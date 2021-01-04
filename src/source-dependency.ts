@@ -14,6 +14,7 @@ main()
 function main () {
   const argv = yargs(process.argv.slice(2))
     // .locale('en')
+    .strict()
     .usage('Usage: $0 <target> [options]')
     .options({
       'filter-include': { type: 'string', describe: 'Name filter (regex) to be included' },
@@ -23,7 +24,7 @@ function main () {
       t: { type: 'string', alias: 'input-type', describe: 'Input type. one of: "AndroidStudio", "dir"' },
       of: { type: 'string', alias: 'output-format', describe: 'Output format. one of: "dot", "dgml", "js"' },
       'find-cycle': { type: 'boolean', describe: 'Find cycle dependencies' },
-      'no-leaf': { type: 'boolean', describe: 'Strip leaf (i.e. only keep package level dependencies)' }
+      leaf: { type: 'boolean', default: true, describe: 'Strip leaf (i.e. only keep package level dependencies)' }
     }).argv
 
   const languageInfo : { [id:string] : { sourceExt: string } } = {
@@ -58,7 +59,7 @@ function main () {
   data.dependencies = applyFilters(data.dependencies, includeFilters, excludeFilters)
   data.dependencies = data.dependencies.map(v => [trimPrefix(v[0], prefix), trimPrefix(v[1], prefix)])
 
-  if (argv['no-leaf']) {
+  if (!argv.leaf) {
     const deps : [string, string][] = data.dependencies.map(v => [parent(v[0]), parent(v[1])])
     data.dependencies = []
     for (const d of deps) {
@@ -253,7 +254,7 @@ function analyzeJavaDependencies (dir: string, files: string[]) {
 
 function analyzePythonDependencies (dir: string, files: string[]) {
   const fileNameToModuleName = function (f: string) {
-    return path.relative(dir, f).replace(/\.py$/, '').replaceAll(/\\|\//g, '.')
+    return path.relative(dir, f).replace(/\.py$/, '').replace(/\\|\//g, '.')
   }
 
   const selfModules = files.map(fileNameToModuleName)
@@ -279,7 +280,7 @@ function analyzePythonDependencies (dir: string, files: string[]) {
         if (selfModules.indexOf(fullName) >= 0) {
           deps.push(fullName)
         } else {
-          deps.push(dependent)
+          deps.push('lib.' + dependent)
         }
       }
     }
