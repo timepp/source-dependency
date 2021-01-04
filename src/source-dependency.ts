@@ -3,8 +3,8 @@
 import glob from 'glob'
 import * as fs from 'fs'
 import yargs from 'yargs'
-import xmldoc from 'xmldoc'
 import * as path from 'path'
+import * as ls from './language-service.js'
 
 type DependencyData = {
   dependencies: [string, string][],
@@ -18,21 +18,16 @@ function main () {
     // .locale('en')
     .strict()
     .usage('Usage: $0 <target> [options]')
+    .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
       'filter-include': { type: 'string', describe: 'Name filter (regex) to be included' },
       'filter-exclude': { type: 'string', describe: 'Name filter (regex) to be excluded' },
       strip: { type: 'string', describe: 'Common prefix to be stripped to simplify the result' },
       l: { type: 'string', alias: 'language', describe: 'Source code language. Currently support java[default] and python.' },
-      t: { type: 'string', alias: 'input-type', describe: 'Input type. one of: "AndroidStudio", "dir"' },
-      of: { type: 'string', alias: 'output-format', describe: 'Output format. one of: "dot", "dgml", "js"' },
+      f: { type: 'string', alias: 'format', describe: 'Output format. one of: "dot", "dgml", "js"' },
       'find-cycle': { type: 'boolean', describe: 'Find cycle dependencies' },
       leaf: { type: 'boolean', default: true, describe: 'Strip leaf (i.e. only keep package level dependencies)' }
     }).argv
-
-  const languageInfo : { [id:string] : { sourceExt: string } } = {
-    java: { sourceExt: 'java' },
-    python: { sourceExt: 'py' }
-  }
 
   // console.log(argv);
   if (argv._.length !== 1) {
@@ -40,22 +35,33 @@ function main () {
     return
   }
 
+  const target = path.resolve(argv._[0].toString())
+  if (!fs.existsSync(target)) {
+    console.error(`file not exist: ${target}`)
+    return
+  }
+
   const includeFilters = argv['filter-include'] ? [argv['filter-include']].flat().map(v => new RegExp(v, 'g')) : []
   const excludeFilters = argv['filter-exclude'] ? [argv['filter-exclude']].flat().map(v => new RegExp(v, 'g')) : []
   const prefix = argv.strip
-  const language = argv.l ? argv.l : 'java'
+
+  const lang = ls.getLanguageService(argv.l || 'java')
+  if (!lang) {
+    console.error(`unsupported language: ${argv.l}`)
+    return
+  }
 
   const data : DependencyData = {
     dependencies: [],
     contains: []
   }
 
-  if (argv.t === 'AndroidStudio') {
-    data.dependencies = generateFromASDA(argv._[0].toString())
+  if (fs.lstatSync(target).isFile()) {
+    data.dependencies = lang.parse(path.dirname(target), [target])
   } else {
-    const dir = path.resolve(argv._[0].toString())
-    const files = glob.sync(`${dir}/**/*.${languageInfo[language].sourceExt}`)
-    data.dependencies = analyzeDependencies(dir, files, language)
+    const dir = target
+    const files = glob.sync(`${dir}/**/*.{${lang.exts().join(',')}}`)
+    data.dependencies = lang.parse(dir, files)
   }
 
   data.dependencies = applyFilters(data.dependencies, includeFilters, excludeFilters)
@@ -207,122 +213,4 @@ function findCycleDependencies (data: DependencyData) {
       break
     }
   }
-}
-
-function readFileByLines (file: string) {
-  const data = fs.readFileSync(file, 'utf-8')
-  return data.split(/\r?\n/)
-}
-
-function analyzeDependencies (dir: string, files: string[], language: string) {
-  if (language === 'java') {
-    return analyzeJavaDependencies(dir, files)
-  } else {
-    return analyzePythonDependencies(dir, files)
-  }
-}
-
-function analyzeJavaDependencies (dir: string, files: string[]) {
-  const data : [string, string][][] = []
-  for (const file of files) {
-    let packageName = ''
-    let name = ''
-    const deps : string[] = []
-
-    let r = file.match(/\/([^/]+)\.java/)
-    if (r) {
-      name = r[1]
-    }
-
-    const lines = readFileByLines(file)
-    for (const l of lines) {
-      r = l.match(/^package (.*);$/)
-      if (r) {
-        packageName = r[1]
-      }
-
-      r = l.match(/^import( static)? (.*);$/)
-      if (r) {
-        deps.push(r[2])
-      }
-    }
-
-    const fullName = packageName + '.' + name
-    data.push(deps.map(v => [fullName, v]))
-  }
-
-  return data.flat()
-}
-
-function analyzePythonDependencies (dir: string, files: string[]) {
-  const fileNameToModuleName = function (f: string) {
-    return path.relative(dir, f).replace(/\.py$/, '').replace(/\\|\//g, '.')
-  }
-
-  const selfModules = files.map(fileNameToModuleName)
-  const data : [string, string][][] = []
-  for (const f of files) {
-    const moduleName = fileNameToModuleName(f)
-    const packageName = moduleName.split('.').slice(0, -1).join('.')
-    const deps : string[] = []
-    const lines = readFileByLines(f)
-    for (const l of lines) {
-      let dependent = ''
-      let r = l.match(/^\s*import\s+([^\s]+)\s*$/)
-      if (r) dependent = r[1]
-
-      r = l.match(/^\s*from\s+([^\s]+)\s+import.*$/)
-      if (r) dependent = r[1]
-
-      r = l.match(/^\s*import\s+([^\s]+)\s+as.*$/)
-      if (r) dependent = r[1]
-
-      if (dependent !== '') {
-        const fullName = packageName === '' ? dependent : packageName + '.' + dependent
-        if (selfModules.indexOf(fullName) >= 0) {
-          deps.push(fullName)
-        } else {
-          deps.push('lib.' + dependent)
-        }
-      }
-    }
-    data.push(deps.map(v => [moduleName, v]))
-  }
-
-  return data.flat()
-}
-
-function generateFromASDA (androidStudioDepFile: string) {
-  const getClass = function (v: string) {
-    const m1 = v.match(/\.jar!\/(.*)\.(class|java)$/)
-    if (m1) {
-      return m1[1].replace(/\//g, '.')
-    }
-    const m2 = v.match(/\/com\/(.*)\.java$/)
-    if (m2) {
-      return m2[1].replace(/\//g, '.')
-    }
-    return null
-  }
-
-  const deps : [string, string][] = []
-  const content = fs.readFileSync(androidStudioDepFile, 'utf-8')
-  const doc = new xmldoc.XmlDocument(content)
-  for (const c of doc.children) {
-    if (c instanceof xmldoc.XmlElement && c.name === 'file') {
-      const c1 = getClass(c.attr.path)
-      if (c1 && c.children) {
-        for (const d of c.children) {
-          if (d instanceof xmldoc.XmlElement && d.name === 'dependency') {
-            const c2 = getClass(d.attr.path)
-            if (c2) {
-              deps.push([c1, c2])
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return deps
 }
