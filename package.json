@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "description": "A simple tool to get rough source code dependencies inside your app",
-  "main": "lib/code-dependency.js",
+  "main": "lib/source-dependency.js",
+  "bin": {
+    "source-dependency": "lib/source-dependency.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc"
