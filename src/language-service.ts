@@ -11,7 +11,7 @@ interface LanguageService {
 
 class JavaLanguageService implements LanguageService {
   name () { return 'java' }
-  desc () { return 'treat all import statements as dependencies, direct references without import is not counted' }
+  desc () { return 'By parsing all import statements, direct references are not supported' }
   exts () { return ['java'] }
   parse (dir: string, files: string[]) {
     const data : [string, string][][] = []
@@ -48,7 +48,7 @@ class JavaLanguageService implements LanguageService {
 
 class PythonLanguageService implements LanguageService {
   name () { return 'python' }
-  desc () { return 'treat all import statements as dependencies' }
+  desc () { return 'By parsing all import statements' }
   exts () { return ['py'] }
   parse (dir: string, files: string[]) {
     const fileNameToModuleName = function (f: string) {
@@ -91,7 +91,7 @@ class PythonLanguageService implements LanguageService {
 
 class AsdLanguageService implements LanguageService {
   name () { return 'asd' }
-  desc () { return 'Android Studio dependency analyzer export format. 100% accurate for Android project' }
+  desc () { return 'Android Studio dependency analyzer export format' }
   exts () { return ['xml'] }
   parse (dir: string, files: string[]) {
     if (files.length === 1) {
@@ -103,18 +103,18 @@ class AsdLanguageService implements LanguageService {
 
 class CLanguageService implements LanguageService {
   name () { return 'c' }
-  desc () { return 'Analyze #include directives' }
+  desc () { return 'By parsing #include directives' }
   exts () { return ['c', 'cpp', 'cxx', 'hpp', 'h', 'cc'] }
   parse (dir: string, files: string[]) {
     const fileNameToModuleName = function (f: string) {
-      return path.relative(dir, f).replace(/\.[^.]+$/, '').replace(/\\|\//g, '.')
+      return path.relative(dir, f).replace(/\.[^.]+$/, '').replace(/\\|\//g, '/')
     }
 
     const selfModules = files.map(fileNameToModuleName)
     const data : [string, string][][] = []
     for (const f of files) {
       const moduleName = fileNameToModuleName(f)
-      const packageName = moduleName.split('.').slice(0, -1).join('.')
+      const packageName = parent(moduleName, '/')
       const deps : string[] = []
       const lines = readFileByLines(f)
       for (const l of lines) {
@@ -126,12 +126,12 @@ class CLanguageService implements LanguageService {
         if (r) dependent = r[1]
 
         if (dependent !== '') {
-          dependent = dependent.split('.').slice(0, -1).join('.')
-          const fullName = packageName === '' ? dependent : packageName + '.' + dependent
+          dependent = stripExtension(dependent)
+          const fullName = cancelDot(packageName === '' ? dependent : packageName + '/' + dependent)
           if (selfModules.indexOf(fullName) >= 0) {
             if (moduleName !== fullName) deps.push(fullName)
           } else {
-            deps.push('lib.' + dependent)
+            deps.push('lib/' + dependent)
           }
         }
       }
@@ -187,6 +187,36 @@ function parseAndroidStudioDepFile (androidStudioDepFile: string) {
 function readFileByLines (file: string) {
   const data = fs.readFileSync(file, 'utf-8')
   return data.split(/\r?\n/)
+}
+
+function parent (s: string, sp: string = '.') {
+  const p = s.lastIndexOf(sp)
+  if (p >= 0) {
+    return s.substr(0, p)
+  }
+  return ''
+}
+
+function stripExtension (s: string) {
+  return parent(s, '.')
+}
+
+/**
+ * cancelDot('a/b/c/../../e/./f') => 'a/e/f'
+ */
+function cancelDot (s: string) {
+  const components = s.split('/')
+  const r = []
+  for (const c of components) {
+    if (c === '.') {
+      // ignore
+    } else if (c === '..') {
+      r.pop()
+    } else {
+      r.push(c)
+    }
+  }
+  return r.join('/')
 }
 
 export function getLanguageService (name: string) {

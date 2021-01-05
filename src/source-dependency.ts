@@ -14,24 +14,28 @@ type DependencyData = {
 main()
 
 function main () {
-  const argv = yargs(process.argv.slice(2))
-    // .locale('en')
+  const args = yargs(process.argv.slice(2))
+  const argv = args
+    .locale('en')
     .strict()
     .usage('Usage: $0 <target> [options]')
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
-      'filter-include': { type: 'string', describe: 'Name filter (regex) to be included' },
-      'filter-exclude': { type: 'string', describe: 'Name filter (regex) to be excluded' },
+      check: { type: 'boolean', describe: 'check suspicious dependencies such as circles' },
+      noleaf: { type: 'boolean', describe: 'Strip leaf (only keep package level dependencies)' },
+      include: { type: 'string', describe: 'Name filter (regex) to be included' },
+      exclude: { type: 'string', describe: 'Name filter (regex) to be excluded' },
       strip: { type: 'string', describe: 'Common prefix to be stripped to simplify the result' },
-      l: { type: 'string', alias: 'language', describe: 'Source code language. Currently support java[default] and python.' },
-      f: { type: 'string', alias: 'format', describe: 'Output format. one of: "dot", "dgml", "js"' },
-      'find-cycle': { type: 'boolean', describe: 'Find cycle dependencies' },
-      leaf: { type: 'boolean', default: true, describe: 'Strip leaf (i.e. only keep package level dependencies)' }
+      l: { type: 'string', alias: 'language', describe: 'Source code language' },
+      f: { type: 'string', alias: 'format', describe: 'Output format. one of: "dot", "dgml", "js"' }
     }).argv
 
   // console.log(argv);
-  if (argv._.length !== 1) {
-    yargs.showHelp()
+  if (argv._.length === 0) {
+    args.showHelp()
+    return
+  } else if (argv._.length > 1) {
+    console.error('too many targets: only 1 target is supported')
     return
   }
 
@@ -41,8 +45,8 @@ function main () {
     return
   }
 
-  const includeFilters = argv['filter-include'] ? [argv['filter-include']].flat().map(v => new RegExp(v, 'g')) : []
-  const excludeFilters = argv['filter-exclude'] ? [argv['filter-exclude']].flat().map(v => new RegExp(v, 'g')) : []
+  const includeFilters = argv.include ? [argv.include].flat().map(v => new RegExp(v, 'g')) : []
+  const excludeFilters = argv.exclude ? [argv.exclude].flat().map(v => new RegExp(v, 'g')) : []
   const prefix = argv.strip
 
   const lang = ls.getLanguageService(argv.l || 'java')
@@ -70,7 +74,7 @@ function main () {
   data.dependencies = applyFilters(data.dependencies, includeFilters, excludeFilters)
   data.dependencies = data.dependencies.map(v => [trimPrefix(v[0], prefix), trimPrefix(v[1], prefix)])
 
-  if (!argv.leaf) {
+  if (argv.noleaf) {
     const deps : [string, string][] = data.dependencies.map(v => [parent(v[0]), parent(v[1])])
     data.dependencies = []
     for (const d of deps) {
@@ -81,12 +85,13 @@ function main () {
 
   data.contains = getContains(data.dependencies)
 
-  if (argv['find-cycle']) {
+  if (argv.cycle) {
     findCycleDependencies(data)
   } else {
     switch (argv.f) {
       case 'dgml': generateDGML(data); break
       case 'js': generateJS(data); break
+      case 'dot': generateDot(data); break
       default: generateDependencies(data); break
     }
   }
@@ -147,6 +152,11 @@ function parent (s: string) {
   const p = s.lastIndexOf('.')
   if (p >= 0) {
     return s.substr(0, p)
+  } else {
+    const q = s.lastIndexOf('/')
+    if (q >= 0) {
+      return s.substr(0, q)
+    }
   }
   return ''
 }
@@ -186,6 +196,15 @@ function generateDGML (data: DependencyData) {
 
 function generateJS (data: DependencyData) {
   console.log('const data = ' + JSON.stringify(data, null, 4) + ';')
+}
+
+function generateDot (data: DependencyData) {
+  const dot = [
+    'digraph {',
+    data.dependencies.map(v => `"${v[0]}" -> "${v[1]}"`),
+    '}'
+  ].flat().join('\n')
+  console.log(dot)
 }
 
 function findCycleDependencies (data: DependencyData) {

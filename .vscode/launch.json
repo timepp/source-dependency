@@ -13,9 +13,9 @@
             "skipFiles": [
                 "<node_internals>/**"
             ],
-            "program": "${workspaceFolder}\\src\\source-dependency.ts",
+            "program": "${workspaceFolder}/src/source-dependency.ts",
             "preLaunchTask": "tsc: build - tsconfig.json",
-            "args": [ "-l", "c", "f:\\src\\siot_sdk", "--filter-exclude", "third_party" ],
+            "args": [ "-l", "c", "f:/src/siot_sdk", "xxx", "--filter-exclude", "third_party" ],
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]
