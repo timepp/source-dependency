@@ -101,10 +101,52 @@ class AsdLanguageService implements LanguageService {
   }
 }
 
+class CLanguageService implements LanguageService {
+  name () { return 'c' }
+  desc () { return 'Analyze #include directives' }
+  exts () { return ['c', 'cpp', 'cxx', 'hpp', 'h', 'cc'] }
+  parse (dir: string, files: string[]) {
+    const fileNameToModuleName = function (f: string) {
+      return path.relative(dir, f).replace(/\.[^.]+$/, '').replace(/\\|\//g, '.')
+    }
+
+    const selfModules = files.map(fileNameToModuleName)
+    const data : [string, string][][] = []
+    for (const f of files) {
+      const moduleName = fileNameToModuleName(f)
+      const packageName = moduleName.split('.').slice(0, -1).join('.')
+      const deps : string[] = []
+      const lines = readFileByLines(f)
+      for (const l of lines) {
+        let dependent = ''
+        let r = l.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
+        if (r) dependent = r[1]
+
+        r = l.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
+        if (r) dependent = r[1]
+
+        if (dependent !== '') {
+          dependent = dependent.split('.').slice(0, -1).join('.')
+          const fullName = packageName === '' ? dependent : packageName + '.' + dependent
+          if (selfModules.indexOf(fullName) >= 0) {
+            if (moduleName !== fullName) deps.push(fullName)
+          } else {
+            deps.push('lib.' + dependent)
+          }
+        }
+      }
+      data.push(deps.map(v => [moduleName, v]))
+    }
+
+    return data.flat()
+  }
+}
+
 const languageServiceRegistry : LanguageService[] = [
   new JavaLanguageService(),
   new PythonLanguageService(),
-  new AsdLanguageService()
+  new AsdLanguageService(),
+  new CLanguageService()
 ]
 
 function parseAndroidStudioDepFile (androidStudioDepFile: string) {

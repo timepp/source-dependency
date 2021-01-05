@@ -60,7 +60,10 @@ function main () {
     data.dependencies = lang.parse(path.dirname(target), [target])
   } else {
     const dir = target
-    const files = glob.sync(`${dir}/**/*.{${lang.exts().join(',')}}`)
+    // to fix glob bug that brace set must contain multiple elements (https://github.com/isaacs/node-glob/issues/383)
+    const extPattern = lang.exts().length === 1 ? lang.exts()[0] : `{${lang.exts().join(',')}}`
+    const pattern = `${dir}/**/*.${extPattern}`
+    const files = glob.sync(pattern)
     data.dependencies = lang.parse(dir, files)
   }
 
@@ -81,7 +84,7 @@ function main () {
   if (argv['find-cycle']) {
     findCycleDependencies(data)
   } else {
-    switch (argv.of) {
+    switch (argv.f) {
       case 'dgml': generateDGML(data); break
       case 'js': generateJS(data); break
       default: generateDependencies(data); break
@@ -197,7 +200,7 @@ function findCycleDependencies (data: DependencyData) {
   }
 
   if (deps.length === 0) {
-    console.log('没有循环依赖.')
+    console.log('No circular dependency.')
     return
   }
 

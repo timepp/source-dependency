@@ -15,7 +15,7 @@
             ],
             "program": "${workspaceFolder}\\src\\source-dependency.ts",
             "preLaunchTask": "tsc: build - tsconfig.json",
-            "args": [ "f:\\src\\projectx", "-l", "python", "-of" ],
+            "args": [ "-l", "c", "f:\\src\\siot_sdk", "--filter-exclude", "third_party" ],
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]
