@@ -7,7 +7,8 @@ import * as path from 'path'
 import * as ls from './language-service.js'
 
 type DependencyData = {
-  dependencies: [string, string][],
+  dependencies: ls.Dependencies,
+  flatDependencies: [string, string][],
   contains: [string, string][]
 }
 
@@ -22,7 +23,8 @@ function main () {
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
       check: { type: 'boolean', describe: 'check suspicious dependencies such as circles' },
-      noleaf: { type: 'boolean', describe: 'Strip leaf (only keep package level dependencies)' },
+      inner: { type: 'boolean', describe: 'Show only inner dependencies' },
+      depth: { type: 'string', describe: 'collapse depth on package level' },
       include: { type: 'string', describe: 'Name filter (regex) to be included' },
       exclude: { type: 'string', describe: 'Name filter (regex) to be excluded' },
       strip: { type: 'string', describe: 'Common prefix to be stripped to simplify the result' },
@@ -56,7 +58,8 @@ function main () {
   }
 
   const data : DependencyData = {
-    dependencies: [],
+    dependencies: {},
+    flatDependencies: [],
     contains: []
   }
 
@@ -71,19 +74,33 @@ function main () {
     data.dependencies = lang.parse(dir, files)
   }
 
-  data.dependencies = applyFilters(data.dependencies, includeFilters, excludeFilters)
-  data.dependencies = data.dependencies.map(v => [trimPrefix(v[0], prefix), trimPrefix(v[1], prefix)])
-
-  if (argv.noleaf) {
-    const deps : [string, string][] = data.dependencies.map(v => [parent(v[0]), parent(v[1])])
-    data.dependencies = []
-    for (const d of deps) {
-      const found = data.dependencies.some(v => v[0] === d[0] && v[1] === d[1])
-      if (!found) data.dependencies.push(d)
+  for (const k of Object.keys(data.dependencies)) {
+    for (const v of data.dependencies[k]) {
+      if (!argv.inner || v in data.dependencies) {
+        data.flatDependencies.push([k, v])
+      }
     }
   }
 
-  data.contains = getContains(data.dependencies)
+  data.flatDependencies = applyFilters(data.flatDependencies, includeFilters, excludeFilters)
+  data.flatDependencies = data.flatDependencies.map(v => [trimPrefix(v[0], prefix), trimPrefix(v[1], prefix)])
+
+  if (argv.depth) {
+    const [d1, d2 = 0] = argv.depth.split(',').map(v => parseInt(v))
+    const deps : [string, string][] = []
+    for (const v of data.flatDependencies) {
+      const a = stripByDepth(v[0], v[0] in data.dependencies ? d1 : d2)
+      const b = stripByDepth(v[1], v[1] in data.dependencies ? d1 : d2)
+      if (a && b && a !== b) deps.push([a, b])
+    }
+    data.flatDependencies = []
+    for (const d of deps) {
+      const found = data.flatDependencies.some(v => v[0] === d[0] && v[1] === d[1])
+      if (!found) data.flatDependencies.push(d)
+    }
+  }
+
+  data.contains = getContains(data.flatDependencies)
 
   if (argv.cycle) {
     findCycleDependencies(data)
@@ -143,7 +160,7 @@ function applyFiltersToStr (str: string, includeFilters: RegExp[], excludeFilter
 }
 
 function generateDependencies (data: DependencyData) {
-  for (const d of data.dependencies) {
+  for (const d of data.flatDependencies) {
     console.log(`${d[0]} -> ${d[1]}`)
   }
 }
@@ -161,6 +178,13 @@ function parent (s: string) {
   return ''
 }
 
+function stripByDepth (s: string, depth: number) {
+  if (depth === 0) return s
+  const splitter = s.indexOf('.') >= 0 ? '.' : '/'
+  const arr = s.split(/\.|\//)
+  return arr.slice(0, depth).join(splitter)
+}
+
 function generateDGML (data: DependencyData) {
   // node
   const nodes : { [id: string]: number } = {}
@@ -174,7 +198,7 @@ function generateDGML (data: DependencyData) {
     linkstr += `  <Link Source="${l[0]}" Target="${l[1]}" Category="Contains" />\n`
     cnodes[l[0]] = 1
   }
-  for (const l of data.dependencies) {
+  for (const l of data.flatDependencies) {
     linkstr += `  <Link Source="${l[0]}" Target="${l[1]}" />\n`
     nodes[l[0]] = 1
     nodes[l[1]] = 1
@@ -201,14 +225,14 @@ function generateJS (data: DependencyData) {
 function generateDot (data: DependencyData) {
   const dot = [
     'digraph {',
-    data.dependencies.map(v => `"${v[0]}" -> "${v[1]}"`),
+    data.flatDependencies.map(v => `"${v[0]}" -> "${v[1]}"`),
     '}'
   ].flat().join('\n')
   console.log(dot)
 }
 
 function findCycleDependencies (data: DependencyData) {
-  let deps = data.dependencies
+  let deps = data.flatDependencies
   // 首先依次删除所有不依赖其他类的类, 直到删不动为止
   while (true) {
     const d = deps.filter(v => deps.findIndex(u => u[0] === v[1]) >= 0)

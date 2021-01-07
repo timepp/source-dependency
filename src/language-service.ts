@@ -2,11 +2,15 @@ import * as fs from 'fs'
 import * as path from 'path'
 import xmldoc from 'xmldoc'
 
+export type Dependencies = {
+  [id: string] : string[]
+}
+
 interface LanguageService {
   name() : string
   desc() : string
   exts() : string[]
-  parse(dir:string, files: string[]) : [string, string][]
+  parse(dir:string, files: string[]) : Dependencies
 }
 
 class JavaLanguageService implements LanguageService {
@@ -14,7 +18,7 @@ class JavaLanguageService implements LanguageService {
   desc () { return 'By parsing all import statements, direct references are not supported' }
   exts () { return ['java'] }
   parse (dir: string, files: string[]) {
-    const data : [string, string][][] = []
+    const data : Dependencies = {}
     for (const file of files) {
       let packageName = ''
       let name = ''
@@ -39,10 +43,10 @@ class JavaLanguageService implements LanguageService {
       }
 
       const fullName = packageName + '.' + name
-      data.push(deps.map(v => [fullName, v]))
+      data[fullName] = deps
     }
 
-    return data.flat()
+    return data
   }
 }
 
@@ -56,7 +60,7 @@ class PythonLanguageService implements LanguageService {
     }
 
     const selfModules = files.map(fileNameToModuleName)
-    const data : [string, string][][] = []
+    const data : Dependencies = {}
     for (const f of files) {
       const moduleName = fileNameToModuleName(f)
       const packageName = moduleName.split('.').slice(0, -1).join('.')
@@ -82,10 +86,10 @@ class PythonLanguageService implements LanguageService {
           }
         }
       }
-      data.push(deps.map(v => [moduleName, v]))
+      data[moduleName] = deps
     }
 
-    return data.flat()
+    return data
   }
 }
 
@@ -111,7 +115,7 @@ class CLanguageService implements LanguageService {
     }
 
     const selfModules = files.map(fileNameToModuleName)
-    const data : [string, string][][] = []
+    const data : Dependencies = {}
     for (const f of files) {
       const moduleName = fileNameToModuleName(f)
       const packageName = parent(moduleName, '/')
@@ -135,10 +139,10 @@ class CLanguageService implements LanguageService {
           }
         }
       }
-      data.push(deps.map(v => [moduleName, v]))
+      data[moduleName] = deps
     }
 
-    return data.flat()
+    return data
   }
 }
 
@@ -162,26 +166,28 @@ function parseAndroidStudioDepFile (androidStudioDepFile: string) {
     return null
   }
 
-  const deps : [string, string][] = []
+  const data : Dependencies = {}
   const content = fs.readFileSync(androidStudioDepFile, 'utf-8')
   const doc = new xmldoc.XmlDocument(content)
   for (const c of doc.children) {
     if (c instanceof xmldoc.XmlElement && c.name === 'file') {
       const c1 = getClass(c.attr.path)
       if (c1 && c.children) {
+        const deps = []
         for (const d of c.children) {
           if (d instanceof xmldoc.XmlElement && d.name === 'dependency') {
             const c2 = getClass(d.attr.path)
             if (c2) {
-              deps.push([c1, c2])
+              deps.push(c2)
             }
           }
         }
+        data[c1] = deps
       }
     }
   }
 
-  return deps
+  return data
 }
 
 function readFileByLines (file: string) {
