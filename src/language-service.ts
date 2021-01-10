@@ -10,6 +10,7 @@ interface LanguageService {
   name() : string
   desc() : string
   exts() : string[]
+  moduleSeparator() : string
   parse(dir:string, files: string[]) : Dependencies
 }
 
@@ -17,6 +18,7 @@ class JavaLanguageService implements LanguageService {
   name () { return 'java' }
   desc () { return 'By parsing all import statements, direct references are not supported' }
   exts () { return ['java'] }
+  moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
     const data : Dependencies = {}
     for (const file of files) {
@@ -54,6 +56,7 @@ class PythonLanguageService implements LanguageService {
   name () { return 'python' }
   desc () { return 'By parsing all import statements' }
   exts () { return ['py'] }
+  moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
     const fileNameToModuleName = function (f: string) {
       return path.relative(dir, f).replace(/\.py$/, '').replace(/\\|\//g, '.')
@@ -97,6 +100,7 @@ class AsdLanguageService implements LanguageService {
   name () { return 'asd' }
   desc () { return 'Android Studio dependency analyzer export format' }
   exts () { return ['xml'] }
+  moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
     if (files.length === 1) {
       return parseAndroidStudioDepFile(files[0])
@@ -109,6 +113,7 @@ class CLanguageService implements LanguageService {
   name () { return 'c' }
   desc () { return 'By parsing #include directives' }
   exts () { return ['c', 'cpp', 'cxx', 'hpp', 'h', 'cc'] }
+  moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
     const fileNameToModuleName = function (f: string) {
       return path.relative(dir, f).replace(/\.[^.]+$/, '').replace(/\\|\//g, '/')
@@ -146,11 +151,61 @@ class CLanguageService implements LanguageService {
   }
 }
 
+class JavascriptLanguageService implements LanguageService {
+  name () { return 'javascript' }
+  desc () { return 'By parsing import and require directives' }
+  exts () { return ['js', 'ts', 'mjs', 'cjs', 'vue'] }
+  moduleSeparator () { return '/' }
+  parse (dir: string, files: string[]) {
+    const data : Dependencies = {}
+    const moduleFiles = files.filter(f => this.exts().indexOf(path.extname(f).slice(1)) >= 0)
+    const modules = moduleFiles.map(f => stripExtension(f))
+    for (const f of moduleFiles) {
+      const moduleName = stripExtension(f)
+      const packageName = path.dirname(f)
+      const deps : string[] = []
+      const lines = readFileByLines(dir + '/' + f)
+      for (const l of lines) {
+        let dependent = ''
+        let r = l.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
+        if (r) dependent = r[1]
+
+        r = l.match(/require\s*\(['"]([^'"]+)['"]\)/)
+        if (r) dependent = r[1]
+
+        if (dependent !== '') {
+          let resolvedDependent = dependent
+          let fullName = cancelDot(packageName === '' ? dependent : packageName + '/' + dependent)
+          // TODO
+          if (dependent.startsWith('@/')) {
+            fullName = 'src' + dependent.slice(1)
+          }
+          if (modules.indexOf(stripExtension(fullName)) >= 0) {
+            resolvedDependent = stripExtension(fullName)
+          } else if (files.indexOf(fullName) >= 0) {
+            resolvedDependent = fullName
+          } else {
+            fullName = joinPath(fullName, 'index.js')
+            if (files.indexOf(fullName) >= 0) {
+              resolvedDependent = stripExtension(fullName)
+            }
+          }
+          deps.push(resolvedDependent)
+        }
+      }
+      data[moduleName] = [...new Set(deps)]
+    }
+
+    return data
+  }
+}
+
 const languageServiceRegistry : LanguageService[] = [
   new JavaLanguageService(),
   new PythonLanguageService(),
   new AsdLanguageService(),
-  new CLanguageService()
+  new CLanguageService(),
+  new JavascriptLanguageService()
 ]
 
 function parseAndroidStudioDepFile (androidStudioDepFile: string) {
@@ -204,7 +259,7 @@ function parent (s: string, sp: string = '.') {
 }
 
 function stripExtension (s: string) {
-  return parent(s, '.')
+  return s.replace(/[.][a-zA-Z0-9]+$/, '')
 }
 
 /**
@@ -223,6 +278,11 @@ function cancelDot (s: string) {
     }
   }
   return r.join('/')
+}
+
+/// equivalent to path.join, but only use '/'
+function joinPath (a: string, b: string) {
+  return a === '' ? b : a + '/' + b
 }
 
 export function getLanguageService (name: string) {

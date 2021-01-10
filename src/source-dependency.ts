@@ -6,10 +6,15 @@ import yargs from 'yargs'
 import * as path from 'path'
 import * as ls from './language-service.js'
 
+type RecursiveObject = {
+  [key: string]: any
+}
+
 type DependencyData = {
   dependencies: ls.Dependencies,
   flatDependencies: [string, string][],
-  contains: [string, string][]
+  contains: RecursiveObject,
+  flatContains: [string, string][]
 }
 
 main()
@@ -20,16 +25,19 @@ function main () {
     .locale('en')
     .strict()
     .usage('Usage: $0 <target> [options]')
+    .wrap(args.terminalWidth())
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
       check: { type: 'boolean', describe: 'check suspicious dependencies such as circles' },
-      inner: { type: 'boolean', describe: 'Show only inner dependencies' },
+      inner: { type: 'boolean', describe: 'show only inner dependencies' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
+      'include-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
+      'exclude-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
       include: { type: 'string', describe: 'Name filter (regex) to be included' },
       exclude: { type: 'string', describe: 'Name filter (regex) to be excluded' },
-      strip: { type: 'string', describe: 'Common prefix to be stripped to simplify the result' },
-      l: { type: 'string', alias: 'language', describe: 'Source code language' },
-      f: { type: 'string', alias: 'format', describe: 'Output format. one of: "dot", "dgml", "js"' }
+      strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
+      l: { type: 'string', alias: 'language', describe: 'Source code language\nsupported language:\njava\nc' },
+      f: { type: 'string', alias: 'format', describe: 'output format. one of: "dot", "dgml", "js"' }
     }).argv
 
   // console.log(argv);
@@ -49,6 +57,10 @@ function main () {
 
   const includeFilters = argv.include ? [argv.include].flat().map(v => new RegExp(v, 'g')) : []
   const excludeFilters = argv.exclude ? [argv.exclude].flat().map(v => new RegExp(v, 'g')) : []
+  const pathFilters = {
+    includeFilters: argv['include-path'] ? argv['include-path'].map(v => new RegExp(v, 'g')) : [],
+    excludeFilters: argv['exclude-path'] ? argv['exclude-path'].map(v => new RegExp(v, 'g')) : []
+  }
   const prefix = argv.strip
 
   const lang = ls.getLanguageService(argv.l || 'java')
@@ -60,18 +72,19 @@ function main () {
   const data : DependencyData = {
     dependencies: {},
     flatDependencies: [],
-    contains: []
+    contains: {},
+    flatContains: []
   }
 
   if (fs.lstatSync(target).isFile()) {
     data.dependencies = lang.parse(path.dirname(target), [target])
   } else {
     const dir = target
-    // to fix glob bug that brace set must contain multiple elements (https://github.com/isaacs/node-glob/issues/383)
-    const extPattern = lang.exts().length === 1 ? lang.exts()[0] : `{${lang.exts().join(',')}}`
-    const pattern = `${dir}/**/*.${extPattern}`
-    const files = glob.sync(pattern)
-    data.dependencies = lang.parse(dir, files)
+    const pattern = `${dir}/**/*`
+    const files = glob.sync(pattern, { nodir: true })
+    const relativeFiles = files.map(v => path.relative(dir, v).replace(/\\|\//g, '/'))
+    const filteredFiles = relativeFiles.filter(f => applyFiltersToStr(f, pathFilters.includeFilters, pathFilters.excludeFilters))
+    data.dependencies = lang.parse(dir, filteredFiles)
   }
 
   for (const k of Object.keys(data.dependencies)) {
@@ -100,7 +113,20 @@ function main () {
     }
   }
 
-  data.contains = getContains(data.flatDependencies)
+  const getObject = function (s: string) : RecursiveObject {
+    if (s === '') return data.contains
+    const o = getObject(parent(s, lang.moduleSeparator()))
+    const n : RecursiveObject = {}
+    if (!(s in o)) {
+      o[s] = n
+    }
+    return o[s]
+  }
+
+  data.flatContains = getContains(data.flatDependencies, lang.moduleSeparator())
+  for (const m of data.flatDependencies.flat()) {
+    getObject(parent(m, lang.moduleSeparator()))[m] = {}
+  }
 
   if (argv.cycle) {
     findCycleDependencies(data)
@@ -121,14 +147,14 @@ function trimPrefix (s:string, prefix:string|undefined) {
   return s
 }
 
-function getContains (arr: [string, string][]) {
+function getContains (arr: [string, string][], sp: string) {
   const contains: [string, string][] = []
   const processed : { [id: string]: boolean } = {}
 
   const process = function (name: string) {
     while (!(name in processed)) {
       processed[name] = true
-      const parentName = parent(name)
+      const parentName = parent(name, sp)
       if (parentName) {
         contains.push([parentName, name])
         name = parentName
@@ -165,15 +191,10 @@ function generateDependencies (data: DependencyData) {
   }
 }
 
-function parent (s: string) {
-  const p = s.lastIndexOf('.')
+function parent (s: string, sp: string) {
+  const p = s.lastIndexOf(sp)
   if (p >= 0) {
     return s.substr(0, p)
-  } else {
-    const q = s.lastIndexOf('/')
-    if (q >= 0) {
-      return s.substr(0, q)
-    }
   }
   return ''
 }
@@ -194,7 +215,7 @@ function generateDGML (data: DependencyData) {
   const tail = '</DirectedGraph>'
 
   let linkstr = '<Links>\n'
-  for (const l of data.contains) {
+  for (const l of data.flatContains) {
     linkstr += `  <Link Source="${l[0]}" Target="${l[1]}" Category="Contains" />\n`
     cnodes[l[0]] = 1
   }
@@ -223,9 +244,29 @@ function generateJS (data: DependencyData) {
 }
 
 function generateDot (data: DependencyData) {
+  const getSubgraphStatements = function (obj: any) : any[] {
+    if (obj === null) return []
+    const arr = []
+    for (const p in obj) {
+      if (obj[p] === null) {
+        arr.push('"' + p + '"')
+      } else {
+        arr.push('subgraph cluster_' + p.replace(/[^a-zA-Z0-9]/g, '_') + ' {')
+        arr.push('style="rounded"; bgcolor="#028d35"')
+        arr.push(getSubgraphStatements(obj[p]))
+        arr.push('}')
+      }
+    }
+    return arr.flat()
+  }
+  const dependencyStatements = data.flatDependencies.map(v => `"${v[0]}" -> "${v[1]}"`)
+  const subgraphStatements = getSubgraphStatements(data.contains)
+
   const dot = [
     'digraph {',
-    data.flatDependencies.map(v => `"${v[0]}" -> "${v[1]}"`),
+    '  overlap=false',
+    subgraphStatements,
+    dependencyStatements,
     '}'
   ].flat().join('\n')
   console.log(dot)
