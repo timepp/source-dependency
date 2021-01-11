@@ -28,6 +28,7 @@ function main () {
     .wrap(args.terminalWidth())
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
+      // TODO: group external dependencies together
       check: { type: 'boolean', describe: 'check suspicious dependencies such as circles' },
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
       depth: { type: 'string', describe: 'collapse depth on package level' },

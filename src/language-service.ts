@@ -157,6 +157,7 @@ class JavascriptLanguageService implements LanguageService {
   exts () { return ['js', 'ts', 'mjs', 'cjs', 'vue'] }
   moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
+    // TODO: "stripExtension" should only strip some known extensions
     const data : Dependencies = {}
     const moduleFiles = files.filter(f => this.exts().indexOf(path.extname(f).slice(1)) >= 0)
     const modules = moduleFiles.map(f => stripExtension(f))
@@ -176,11 +177,13 @@ class JavascriptLanguageService implements LanguageService {
         if (dependent !== '') {
           let resolvedDependent = dependent
           let fullName = cancelDot(packageName === '' ? dependent : packageName + '/' + dependent)
-          // TODO
+          // TODO: respect webpack alias in config
           if (dependent.startsWith('@/')) {
             fullName = 'src' + dependent.slice(1)
           }
-          if (modules.indexOf(stripExtension(fullName)) >= 0) {
+          if (modules.indexOf(fullName) >= 0) {
+            resolvedDependent = fullName
+          } else if (modules.indexOf(stripExtension(fullName)) >= 0) {
             resolvedDependent = stripExtension(fullName)
           } else if (files.indexOf(fullName) >= 0) {
             resolvedDependent = fullName
