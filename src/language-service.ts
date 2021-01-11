@@ -160,9 +160,7 @@ class JavascriptLanguageService implements LanguageService {
     // TODO: "stripExtension" should only strip some known extensions
     const data : Dependencies = {}
     const moduleFiles = files.filter(f => this.exts().indexOf(path.extname(f).slice(1)) >= 0)
-    const modules = moduleFiles.map(f => stripExtension(f))
     for (const f of moduleFiles) {
-      const moduleName = stripExtension(f)
       const packageName = path.dirname(f)
       const deps : string[] = []
       const lines = readFileByLines(dir + '/' + f)
@@ -171,32 +169,44 @@ class JavascriptLanguageService implements LanguageService {
         let r = l.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
         if (r) dependent = r[1]
 
-        r = l.match(/require\s*\(['"]([^'"]+)['"]\)/)
-        if (r) dependent = r[1]
+        r = l.match(/(require|import)\s*\(['"]([^'"]+)['"]\)/)
+        if (r) dependent = r[2]
 
         if (dependent !== '') {
-          let resolvedDependent = dependent
           let fullName = cancelDot(packageName === '' ? dependent : packageName + '/' + dependent)
           // TODO: respect webpack alias in config
           if (dependent.startsWith('@/')) {
             fullName = 'src' + dependent.slice(1)
           }
-          if (modules.indexOf(fullName) >= 0) {
+
+          let resolvedDependent = null
+          if (files.indexOf(fullName) >= 0) {
             resolvedDependent = fullName
-          } else if (modules.indexOf(stripExtension(fullName)) >= 0) {
-            resolvedDependent = stripExtension(fullName)
-          } else if (files.indexOf(fullName) >= 0) {
-            resolvedDependent = fullName
-          } else {
-            fullName = joinPath(fullName, 'index.js')
-            if (files.indexOf(fullName) >= 0) {
-              resolvedDependent = stripExtension(fullName)
+          }
+
+          if (!resolvedDependent) {
+            for (const ext of this.exts()) {
+              const testName1 = fullName + '.' + ext
+              if (files.indexOf(testName1) >= 0) {
+                resolvedDependent = testName1
+                break
+              }
+              const testName2 = joinPath(fullName, 'index.' + ext)
+              if (files.indexOf(testName2) >= 0) {
+                resolvedDependent = testName2
+                break
+              }
             }
           }
+
+          if (!resolvedDependent) {
+            resolvedDependent = dependent
+          }
+
           deps.push(resolvedDependent)
         }
       }
-      data[moduleName] = [...new Set(deps)]
+      data[f] = [...new Set(deps)]
     }
 
     return data
