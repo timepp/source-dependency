@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import glob from 'glob'
 import * as fs from 'fs'
 import yargs from 'yargs'
 import * as path from 'path'
 import * as ls from './language-service.js'
+import * as util from './util.js'
 
 type RecursiveObject = {
   [key: string]: any
@@ -34,10 +34,10 @@ function main () {
       depth: { type: 'string', describe: 'collapse depth on package level' },
       'include-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
       'exclude-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
-      include: { type: 'string', describe: 'Name filter (regex) to be included' },
-      exclude: { type: 'string', describe: 'Name filter (regex) to be excluded' },
+      include: { type: 'string', describe: 'name filter (regex) to be included' },
+      exclude: { type: 'string', describe: 'name filter (regex) to be excluded' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
-      l: { type: 'string', alias: 'language', describe: 'Source code language\nsupported language:\njava\nc' },
+      l: { type: 'string', alias: 'language', describe: 'source code language, see below' },
       f: { type: 'string', alias: 'format', describe: 'output format. one of: "dot", "dgml", "js"' }
     }).argv
 
@@ -81,11 +81,8 @@ function main () {
     data.dependencies = lang.parse(path.dirname(target), [target])
   } else {
     const dir = target
-    const pattern = `${dir}/**/*`
-    const files = glob.sync(pattern, { nodir: true })
-    const relativeFiles = files.map(v => path.relative(dir, v).replace(/\\|\//g, '/'))
-    const filteredFiles = relativeFiles.filter(f => applyFiltersToStr(f, pathFilters.includeFilters, pathFilters.excludeFilters))
-    data.dependencies = lang.parse(dir, filteredFiles)
+    const files = util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
+    data.dependencies = lang.parse(dir, files)
   }
 
   for (const k of Object.keys(data.dependencies)) {
