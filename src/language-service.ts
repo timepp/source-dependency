@@ -16,7 +16,7 @@ interface LanguageService {
 
 class JavaLanguageService implements LanguageService {
   name () { return 'java' }
-  desc () { return 'By parsing all import statements, direct references are not supported' }
+  desc () { return 'java language. direct references are not supported' }
   exts () { return ['java'] }
   moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
@@ -54,7 +54,7 @@ class JavaLanguageService implements LanguageService {
 
 class PythonLanguageService implements LanguageService {
   name () { return 'python' }
-  desc () { return 'By parsing all import statements' }
+  desc () { return 'python language' }
   exts () { return ['py'] }
   moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
@@ -111,7 +111,7 @@ class AsdLanguageService implements LanguageService {
 
 class CLanguageService implements LanguageService {
   name () { return 'c' }
-  desc () { return 'By parsing #include directives' }
+  desc () { return 'c / c++' }
   exts () { return ['c', 'cpp', 'cxx', 'hpp', 'h', 'cc'] }
   moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
@@ -153,7 +153,7 @@ class CLanguageService implements LanguageService {
 
 class JavascriptLanguageService implements LanguageService {
   name () { return 'javascript' }
-  desc () { return 'By parsing import and require directives' }
+  desc () { return 'javascript language. supports `import` and `require`' }
   exts () { return ['js', 'ts', 'mjs', 'cjs', 'vue'] }
   moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
@@ -303,7 +303,8 @@ export function getLanguageService (name: string) {
 }
 
 export function getLanguageSummary () {
+  const maxLanguageNameLength = Math.max(...languageServiceRegistry.map(v => v.name().length))
   return languageServiceRegistry
-    .map(v => v.name() + '  ' + v.desc())
+    .map(v => v.name().padEnd(maxLanguageNameLength) + '  ' + v.desc())
     .join('\n')
 }

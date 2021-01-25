@@ -29,16 +29,15 @@ function main () {
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
       // TODO: group external dependencies together
-      check: { type: 'boolean', describe: 'check suspicious dependencies such as circles' },
+      I: { array: true, type: 'string', alias: 'include', describe: 'path filters (regex) to include' },
+      E: { array: true, type: 'string', alias: 'exclude', describe: 'path filters (regex) to exclude' },
+      l: { type: 'string', alias: 'language', describe: 'source code language, see below' },
+      check: { type: 'boolean', conflicts: ['f', 'o'], describe: 'check suspicious dependencies such as circles' },
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
-      'include-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
-      'exclude-path': { array: true, string: true, describe: 'path filters to scope of analysis' },
-      include: { type: 'string', describe: 'name filter (regex) to be included' },
-      exclude: { type: 'string', describe: 'name filter (regex) to be excluded' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
-      l: { type: 'string', alias: 'language', describe: 'source code language, see below' },
-      f: { type: 'string', alias: 'format', describe: 'output format. one of: "dot", "dgml", "js"' }
+      f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js"' },
+      o: { type: 'string', alias: 'output', describe: 'output file. output format is deduced by ext if not given.' }
     }).argv
 
   // console.log(argv);
@@ -56,11 +55,9 @@ function main () {
     return
   }
 
-  const includeFilters = argv.include ? [argv.include].flat().map(v => new RegExp(v, 'g')) : []
-  const excludeFilters = argv.exclude ? [argv.exclude].flat().map(v => new RegExp(v, 'g')) : []
   const pathFilters = {
-    includeFilters: argv['include-path'] ? argv['include-path'].map(v => new RegExp(v, 'g')) : [],
-    excludeFilters: argv['exclude-path'] ? argv['exclude-path'].map(v => new RegExp(v, 'g')) : []
+    includeFilters: argv.I ? argv.I.map(v => new RegExp(v, 'g')) : [],
+    excludeFilters: argv.E ? argv.E.map(v => new RegExp(v, 'g')) : []
   }
   const prefix = argv.strip
 
@@ -93,7 +90,6 @@ function main () {
     }
   }
 
-  data.flatDependencies = applyFilters(data.flatDependencies, includeFilters, excludeFilters)
   data.flatDependencies = data.flatDependencies.map(v => [trimPrefix(v[0], prefix), trimPrefix(v[1], prefix)])
 
   if (argv.depth) {
@@ -126,14 +122,22 @@ function main () {
     getObject(parent(m, lang.moduleSeparator()))[m] = {}
   }
 
-  if (argv.cycle) {
+  if (argv.check) {
     findCycleDependencies(data)
   } else {
-    switch (argv.f) {
-      case 'dgml': generateDGML(data); break
-      case 'js': generateJS(data); break
-      case 'dot': generateDot(data); break
-      default: generateDependencies(data); break
+    const format = argv.f || path.extname(argv.o || '').slice(1)
+    let result = ''
+    switch (format) {
+      case 'dgml': result = generateDGML(data); break
+      case 'js': result = generateJS(data); break
+      case 'dot': result = generateDot(data); break
+      default: result = generateDependencies(data); break
+    }
+
+    if (argv.o) {
+      fs.writeFileSync(argv.o, result, 'utf-8')
+    } else {
+      console.log(result)
     }
   }
 }
@@ -167,26 +171,8 @@ function getContains (arr: [string, string][], sp: string) {
   return contains
 }
 
-function applyFilters (info: [string, string][], includeFilters: RegExp[], excludeFilters: RegExp[]) {
-  return info.filter(v => applyFiltersToStr(v[0], includeFilters, excludeFilters) && applyFiltersToStr(v[1], includeFilters, excludeFilters))
-}
-
-function applyFiltersToStr (str: string, includeFilters: RegExp[], excludeFilters: RegExp[]) {
-  if (includeFilters.length > 0) {
-    if (!includeFilters.some(v => str.match(v) != null)) {
-      return false
-    }
-  }
-  if (excludeFilters.some(v => str.match(v) != null)) {
-    return false
-  }
-  return true
-}
-
 function generateDependencies (data: DependencyData) {
-  for (const d of data.flatDependencies) {
-    console.log(`${d[0]} -> ${d[1]}`)
-  }
+  return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
 }
 
 function parent (s: string, sp: string) {
@@ -207,38 +193,38 @@ function stripByDepth (s: string, depth: number) {
 function generateDGML (data: DependencyData) {
   // node
   const nodes : { [id: string]: number } = {}
-  const cnodes : { [id: string]: number } = {}
+  const parentNodes : { [id: string]: number } = {}
 
   const header = '<?xml version="1.0" encoding="utf-8"?>\n<DirectedGraph xmlns="http://schemas.microsoft.com/vs/2009/dgml">\n'
   const tail = '</DirectedGraph>'
 
-  let linkstr = '<Links>\n'
+  let linkStr = '<Links>\n'
   for (const l of data.flatContains) {
-    linkstr += `  <Link Source="${l[0]}" Target="${l[1]}" Category="Contains" />\n`
-    cnodes[l[0]] = 1
+    linkStr += `  <Link Source="${l[0]}" Target="${l[1]}" Category="Contains" />\n`
+    parentNodes[l[0]] = 1
   }
   for (const l of data.flatDependencies) {
-    linkstr += `  <Link Source="${l[0]}" Target="${l[1]}" />\n`
+    linkStr += `  <Link Source="${l[0]}" Target="${l[1]}" />\n`
     nodes[l[0]] = 1
     nodes[l[1]] = 1
   }
-  linkstr += '</Links>\n'
+  linkStr += '</Links>\n'
 
-  let nodestr = '<Nodes>\n'
-  for (const n in cnodes) {
-    nodestr += `  <Node Id="${n}" Label="${n}" Group="Collapsed"/>\n`
+  let nodeStr = '<Nodes>\n'
+  for (const n in parentNodes) {
+    nodeStr += `  <Node Id="${n}" Label="${n}" Group="Collapsed"/>\n`
   }
   for (const n in nodes) {
-    nodestr += `  <Node Id="${n}" Label="${n}"/>\n`
+    nodeStr += `  <Node Id="${n}" Label="${n}"/>\n`
   }
-  nodestr += '</Nodes>\n'
+  nodeStr += '</Nodes>\n'
 
-  const dgml = header + nodestr + linkstr + tail
-  console.log(dgml)
+  const dgml = header + nodeStr + linkStr + tail
+  return dgml
 }
 
 function generateJS (data: DependencyData) {
-  console.log('const data = ' + JSON.stringify(data, null, 4) + ';')
+  return 'const data = ' + JSON.stringify(data, null, 4) + ';'
 }
 
 function generateDot (data: DependencyData) {
@@ -267,7 +253,7 @@ function generateDot (data: DependencyData) {
     dependencyStatements,
     '}'
   ].flat().join('\n')
-  console.log(dot)
+  return dot
 }
 
 function findCycleDependencies (data: DependencyData) {
