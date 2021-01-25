@@ -1,7 +1,10 @@
 # source-dependency
 
-A simple tool to get rough source code dependencies inside your app
-The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup / know many tools before using it for different languages. In the meanwhile, this tool only do lexical parsing on source file, so the result is not always very accurate.
+A simple tool to get rough source code dependencies inside your app.
+
+The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup / know many tools before using it for different languages. 
+
+In the meanwhile, this tool only do lexical parsing on source file, so the result is not always very accurate.
 
 ## install
 
@@ -25,6 +28,6 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 
 | feature        | description                                                  | timeline |
 |----------------|--------------------------------------------------------------|----------|
-| cross-language | true `file level` dependency and deduce file language by ext | 2020 Q1  |
-| top10          | support top 10 language in TOIBE index                       | 2020 Q2  |
-| top50          | support top 50 language in TOIBE index                       | 2020 Q3  |
+| cross-language | true `file level` dependency and deduce file language by ext | 2021 Q1  |
+| top10          | support top 10 language in TOIBE index                       | 2021 Q2  |
+| top50          | support top 50 language in TOIBE index                       | 2021 Q3  |
