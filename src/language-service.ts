@@ -31,7 +31,7 @@ class JavaLanguageService implements LanguageService {
         name = r[1]
       }
 
-      const lines = readFileByLines(file)
+      const lines = readFileByLines(dir + '/' + file)
       for (const l of lines) {
         r = l.match(/^package (.*);$/)
         if (r) {
@@ -115,17 +115,12 @@ class CLanguageService implements LanguageService {
   exts () { return ['c', 'cpp', 'cxx', 'hpp', 'h', 'cc'] }
   moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
-    const fileNameToModuleName = function (f: string) {
-      return path.relative(dir, f).replace(/\.[^.]+$/, '').replace(/\\|\//g, '/')
-    }
-
-    const selfModules = files.map(fileNameToModuleName)
-    const data : Dependencies = {}
-    for (const f of files) {
-      const moduleName = fileNameToModuleName(f)
-      const packageName = parent(moduleName, '/')
+    const data: Dependencies = {}
+    const moduleFiles = files.filter(f => this.exts().indexOf(path.extname(f).slice(1)) >= 0)
+    for (const f of moduleFiles) {
+      const packageName = path.dirname(f)
       const deps : string[] = []
-      const lines = readFileByLines(f)
+      const lines = readFileByLines(dir + '/' + f)
       for (const l of lines) {
         let dependent = ''
         let r = l.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
@@ -135,16 +130,18 @@ class CLanguageService implements LanguageService {
         if (r) dependent = r[1]
 
         if (dependent !== '') {
-          dependent = stripExtension(dependent)
+          let resolvedDependent = null
           const fullName = cancelDot(packageName === '' ? dependent : packageName + '/' + dependent)
-          if (selfModules.indexOf(fullName) >= 0) {
-            if (moduleName !== fullName) deps.push(fullName)
-          } else {
-            deps.push('lib/' + dependent)
+          if (files.indexOf(fullName) >= 0) {
+            resolvedDependent = fullName
           }
+          if (!resolvedDependent) {
+            resolvedDependent = dependent
+          }
+          deps.push(resolvedDependent)
         }
       }
-      data[moduleName] = deps
+      data[f] = [...new Set(deps)]
     }
 
     return data
@@ -157,7 +154,6 @@ class JavascriptLanguageService implements LanguageService {
   exts () { return ['js', 'ts', 'mjs', 'cjs', 'vue'] }
   moduleSeparator () { return '/' }
   parse (dir: string, files: string[]) {
-    // TODO: "stripExtension" should only strip some known extensions
     const data : Dependencies = {}
     const moduleFiles = files.filter(f => this.exts().indexOf(path.extname(f).slice(1)) >= 0)
     for (const f of moduleFiles) {
@@ -261,18 +257,6 @@ function parseAndroidStudioDepFile (androidStudioDepFile: string) {
 function readFileByLines (file: string) {
   const data = fs.readFileSync(file, 'utf-8')
   return data.split(/\r?\n/)
-}
-
-function parent (s: string, sp: string = '.') {
-  const p = s.lastIndexOf(sp)
-  if (p >= 0) {
-    return s.substr(0, p)
-  }
-  return ''
-}
-
-function stripExtension (s: string) {
-  return s.replace(/[.][a-zA-Z0-9]+$/, '')
 }
 
 /**

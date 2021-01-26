@@ -15,7 +15,7 @@
             ],
             "program": "${workspaceFolder}/src/source-dependency.ts",
             "preLaunchTask": "tsc: build - tsconfig.json",
-            "args": [ "../px_web", "--language=javascript", "--exclude-path=node_modules" ],
+            "args": [ "../ffmpeg/libavcodec", "--language=c", "--exclude=nodes_modules" ],
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]

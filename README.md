@@ -2,7 +2,7 @@
 
 A simple tool to get rough source code dependencies inside your app.
 
-The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup / know many tools before using it for different languages. 
+The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup / know many tools before using it for different languages.
 
 In the meanwhile, this tool only do lexical parsing on source file, so the result is not always very accurate.
 
