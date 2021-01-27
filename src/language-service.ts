@@ -59,7 +59,7 @@ class PythonLanguageService implements LanguageService {
   moduleSeparator () { return '.' }
   parse (dir: string, files: string[]) {
     const fileNameToModuleName = function (f: string) {
-      return path.relative(dir, f).replace(/\.py$/, '').replace(/\\|\//g, '.')
+      return f.replace(/\.py$/, '').replace(/\\|\//g, '.')
     }
 
     const selfModules = files.map(fileNameToModuleName)
@@ -68,7 +68,7 @@ class PythonLanguageService implements LanguageService {
       const moduleName = fileNameToModuleName(f)
       const packageName = moduleName.split('.').slice(0, -1).join('.')
       const deps : string[] = []
-      const lines = readFileByLines(f)
+      const lines = readFileByLines(dir + '/' + f)
       for (const l of lines) {
         let dependent = ''
         let r = l.match(/^\s*import\s+([^\s]+)\s*$/)
@@ -282,7 +282,7 @@ function joinPath (a: string, b: string) {
   return a === '' ? b : a + '/' + b
 }
 
-export function getLanguageService (name: string) {
+export function getLanguageService(name: string) {
   return languageServiceRegistry.find(s => s.name() === name)
 }
 

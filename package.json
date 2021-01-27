@@ -1,6 +1,6 @@
 {
   "name": "source-dependency",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "type": "module",
   "description": "A simple tool to get rough source code dependencies inside your app",
   "main": "lib/source-dependency.js",

@@ -24,6 +24,10 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 
 ```
 
+### usage demo
+
+![demo](demo.gif)
+
 ## road map
 
 | feature        | description                                                  | timeline |

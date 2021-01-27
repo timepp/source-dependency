@@ -1,16 +1,21 @@
 import * as fs from 'fs'
 import * as path from 'path'
 
+export function regulateSlash (s: string) {
+  return s.replace(/\\/g, '/')
+}
+
 export function listFilesRecursive (dir: string, includeFilters: RegExp[], excludeFilters: RegExp[]) {
   const ret: string[] = []
   const walk = function (subDirs: string) {
     const entries = fs.readdirSync(path.join(dir, subDirs))
     for (const e of entries) {
       const f = path.join(subDirs, e)
-      if (!applyFiltersToStr(f, includeFilters, excludeFilters)) continue
       const fullName = path.join(dir, f)
       if (fs.lstatSync(fullName).isFile()) {
-        ret.push(f)
+        const name = regulateSlash(f)
+        if (!applyFiltersToStr(name, includeFilters, excludeFilters)) continue
+        ret.push(name)
       } else {
         walk(f)
       }
