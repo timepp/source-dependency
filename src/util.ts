@@ -11,10 +11,10 @@ export function listFilesRecursive (dir: string, includeFilters: RegExp[], exclu
     const entries = fs.readdirSync(path.join(dir, subDirs))
     for (const e of entries) {
       const f = path.join(subDirs, e)
+      const name = regulateSlash(f)
+      if (!applyFiltersToStr(name, includeFilters, excludeFilters)) continue
       const fullName = path.join(dir, f)
       if (fs.lstatSync(fullName).isFile()) {
-        const name = regulateSlash(f)
-        if (!applyFiltersToStr(name, includeFilters, excludeFilters)) continue
         ret.push(name)
       } else {
         walk(f)
@@ -35,4 +35,42 @@ export function applyFiltersToStr (str: string, includeFilters: RegExp[], exclud
     return false
   }
   return true
+}
+
+export type RecursiveObject = {
+  [key: string]: RecursiveObject | null
+}
+
+export function buildHierarchy (arr: string[], separator: string, hierarchy: RecursiveObject = {}) {
+  for (const s of arr) {
+    const parts = s.split(separator)
+    let o = hierarchy
+    for (let i = 0; i < parts.length; i++) {
+      const key = parts.slice(0, i + 1).join(separator)
+      if (!(key in o)) {
+        if (i === parts.length - 1) {
+          o[key] = null
+        } else {
+          const subObject: RecursiveObject = {}
+          o[key] = subObject
+        }
+      }
+      const subObject = o[key]
+      if (subObject === null) break
+      o = subObject
+    }
+  }
+  return hierarchy
+}
+
+export function walkHierarchy (hierarchy: RecursiveObject, visitor: (parent: string, child: string) => void, myName?: string) {
+  for (const key in Object.keys(hierarchy)) {
+    if (myName !== undefined) {
+      visitor(myName, key)
+      const child = hierarchy[key]
+      if (child) {
+        walkHierarchy(child, visitor, key)
+      }
+    }
+  }
 }

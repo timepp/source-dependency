@@ -3,15 +3,18 @@
 import * as fs from 'fs'
 import yargs from 'yargs'
 import * as path from 'path'
+import * as os from 'os'
+import open from 'open'
 import * as ls from './language-service.js'
 import * as util from './util.js'
+import { visjsTemplate } from './visualize.js'
 
 type RecursiveObject = {
   [key: string]: any
 }
 
 type DependencyData = {
-  dependencies: ls.Dependencies,
+  dependencies: { [id: string]: string[] },
   flatDependencies: [string, string][],
   contains: RecursiveObject,
   flatContains: [string, string][]
@@ -28,15 +31,16 @@ function main () {
     .wrap(args.terminalWidth())
     .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
     .options({
-      // TODO: group external dependencies together
       I: { array: true, type: 'string', alias: 'include', describe: 'path filters (regex) to include' },
       E: { array: true, type: 'string', alias: 'exclude', describe: 'path filters (regex) to exclude' },
       l: { type: 'string', alias: 'language', describe: 'source code language, see below' },
-      check: { type: 'boolean', conflicts: ['f', 'o'], describe: 'check suspicious dependencies such as circles' },
+      check: { type: 'boolean', conflicts: ['f', 'o', 'v'], describe: 'check suspicious dependencies such as circles' },
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
+      v: { type: 'boolean', conflicts: ['f', 'o'], describe: 'create visjs html file in tmp folder and then open it with default program' },
+      a: { type: 'boolean', describe: 'include all folders (`.git` and `node_modules` are excluded by default)' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
-      f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js"' },
+      f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js", "vis"' },
       o: { type: 'string', alias: 'output', describe: 'output file. output format is deduced by ext if not given.' }
     }).argv
 
@@ -59,13 +63,10 @@ function main () {
     includeFilters: argv.I ? argv.I.map(v => new RegExp(v, 'g')) : [],
     excludeFilters: argv.E ? argv.E.map(v => new RegExp(v, 'g')) : []
   }
-  const prefix = argv.strip
-
-  const lang = ls.getLanguageService(argv.l || 'java')
-  if (!lang) {
-    console.error(`unsupported language: ${argv.l}`)
-    return
+  if (!argv.a) {
+    pathFilters.excludeFilters.push(/\b.git\b/, /\bnode_modules\b/)
   }
+  const prefix = argv.strip
 
   const data : DependencyData = {
     dependencies: {},
@@ -74,19 +75,25 @@ function main () {
     flatContains: []
   }
 
-  if (fs.lstatSync(target).isFile()) {
-    data.dependencies = lang.parse(path.dirname(target), [target])
-  } else {
-    const dir = target
-    const files = util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
-    data.dependencies = lang.parse(dir, files)
+  const targetIsFile = fs.lstatSync(target).isFile()
+  const dir = targetIsFile ? path.dirname(target) : target
+  const files = targetIsFile ? [target] : util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
+  const dependencyInfo = ls.parse(dir, files, argv.l)
+
+  // use path dependencies currently
+  data.dependencies = dependencyInfo.pathDependencies
+  data.contains = dependencyInfo.pathHierarchy
+
+  if (argv.inner) {
+    for (const k of Object.keys(data.dependencies)) {
+      data.dependencies[k] = data.dependencies[k].filter(v => !v.startsWith('*external*'))
+    }
+    delete data.contains['*external*']
   }
 
   for (const k of Object.keys(data.dependencies)) {
     for (const v of data.dependencies[k]) {
-      if (!argv.inner || v in data.dependencies) {
-        data.flatDependencies.push([k, v])
-      }
+      data.flatDependencies.push([k, v])
     }
   }
 
@@ -107,19 +114,13 @@ function main () {
     }
   }
 
-  const getObject = function (s: string) : RecursiveObject {
-    if (s === '') return data.contains
-    const o = getObject(parent(s, lang.moduleSeparator()))
-    const n : RecursiveObject = {}
-    if (!(s in o)) {
-      o[s] = n
-    }
-    return o[s]
-  }
+  util.walkHierarchy(data.contains, (a, b) => data.flatContains.push([a, b]))
 
-  data.flatContains = getContains(data.flatDependencies, lang.moduleSeparator())
-  for (const m of data.flatDependencies.flat()) {
-    getObject(parent(m, lang.moduleSeparator()))[m] = {}
+  let openOutput = null
+  if (argv.v) {
+    argv.f = 'vis'
+    argv.o = path.join(os.tmpdir(), 'source-dependency-temp.html')
+    openOutput = argv.o
   }
 
   if (argv.check) {
@@ -131,6 +132,7 @@ function main () {
       case 'dgml': result = generateDGML(data); break
       case 'js': result = generateJS(data); break
       case 'dot': result = generateDot(data); break
+      case 'vis': result = generateVisJs(data); break
       default: result = generateDependencies(data); break
     }
 
@@ -139,6 +141,10 @@ function main () {
     } else {
       console.log(result)
     }
+  }
+
+  if (openOutput) {
+    open(openOutput)
   }
 }
 
@@ -149,38 +155,8 @@ function trimPrefix (s:string, prefix:string|undefined) {
   return s
 }
 
-function getContains (arr: [string, string][], sp: string) {
-  const contains: [string, string][] = []
-  const processed : { [id: string]: boolean } = {}
-
-  const process = function (name: string) {
-    while (!(name in processed)) {
-      processed[name] = true
-      const parentName = parent(name, sp)
-      if (parentName) {
-        contains.push([parentName, name])
-        name = parentName
-      }
-    }
-  }
-
-  for (const v of arr) {
-    process(v[0])
-    process(v[1])
-  }
-  return contains
-}
-
 function generateDependencies (data: DependencyData) {
   return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
-}
-
-function parent (s: string, sp: string) {
-  const p = s.lastIndexOf(sp)
-  if (p >= 0) {
-    return s.substr(0, p)
-  }
-  return ''
 }
 
 function stripByDepth (s: string, depth: number) {
@@ -228,16 +204,18 @@ function generateJS (data: DependencyData) {
 }
 
 function generateDot (data: DependencyData) {
-  const getSubgraphStatements = function (obj: any) : any[] {
+  const theme = ['#ffd0cc', '#d0ffcc', '#d0ccff']
+  const getSubgraphStatements = function (obj: any, depth: number = 0) : any[] {
     if (obj === null) return []
     const arr = []
     for (const p in obj) {
       if (obj[p] === null) {
         arr.push('"' + p + '"')
       } else {
+        const color = theme[depth % theme.length]
         arr.push('subgraph cluster_' + p.replace(/[^a-zA-Z0-9]/g, '_') + ' {')
-        arr.push('style="rounded"; bgcolor="#028d35"')
-        arr.push(getSubgraphStatements(obj[p]))
+        arr.push(`style="rounded"; bgcolor="${color}"`)
+        arr.push(getSubgraphStatements(obj[p], depth + 1))
         arr.push('}')
       }
     }
@@ -254,6 +232,14 @@ function generateDot (data: DependencyData) {
     '}'
   ].flat().join('\n')
   return dot
+}
+
+function generateVisJs (data: DependencyData) {
+  const nodeNames = [...new Set(data.flatDependencies.flat())]
+  const nodes = nodeNames.map(v => { return { id: v, label: v, shape: 'box' } })
+  const edges = data.flatDependencies.map(v => { return { from: v[0], to: v[1], arrows: 'to' } })
+  const html = visjsTemplate.replace('__NODES', JSON.stringify(nodes)).replace('__EDGES', JSON.stringify(edges))
+  return html
 }
 
 function findCycleDependencies (data: DependencyData) {
