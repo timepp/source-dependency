@@ -14,9 +14,10 @@ export function listFilesRecursive (dir: string, includeFilters: RegExp[], exclu
       const name = regulateSlash(f)
       if (!applyFiltersToStr(name, includeFilters, excludeFilters)) continue
       const fullName = path.join(dir, f)
-      if (fs.lstatSync(fullName).isFile()) {
+      const stat = fs.lstatSync(fullName)
+      if (stat.isFile()) {
         ret.push(name)
-      } else {
+      } else if (stat.isDirectory()) {
         walk(f)
       }
     }

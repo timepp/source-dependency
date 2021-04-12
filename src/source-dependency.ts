@@ -33,11 +33,11 @@ function main () {
     .options({
       I: { array: true, type: 'string', alias: 'include', describe: 'path filters (regex) to include' },
       E: { array: true, type: 'string', alias: 'exclude', describe: 'path filters (regex) to exclude' },
-      l: { type: 'string', alias: 'language', describe: 'source code language, see below' },
+      l: { type: 'string', alias: 'language', required: true, describe: 'source code language, see below' },
       check: { type: 'boolean', conflicts: ['f', 'o', 'v'], describe: 'check suspicious dependencies such as circles' },
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
       v: { type: 'boolean', conflicts: ['f', 'o'], describe: 'create visjs html file in tmp folder and then open it with default program' },
-      a: { type: 'boolean', describe: 'include all folders (`.git` and `node_modules` are excluded by default)' },
+      a: { type: 'boolean', describe: 'scan for all files. ' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
       f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js", "vis"' },
@@ -78,7 +78,7 @@ function main () {
   const targetIsFile = fs.lstatSync(target).isFile()
   const dir = targetIsFile ? path.dirname(target) : target
   const files = targetIsFile ? [target] : util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
-  const dependencyInfo = ls.parse(dir, files, argv.l)
+  const dependencyInfo = ls.parse(dir, files, argv.l, argv.a)
 
   // use path dependencies currently
   data.dependencies = dependencyInfo.pathDependencies
@@ -103,8 +103,8 @@ function main () {
     const [d1, d2 = 0] = argv.depth.split(',').map(v => parseInt(v))
     const deps : [string, string][] = []
     for (const v of data.flatDependencies) {
-      const a = stripByDepth(v[0], v[0] in data.dependencies ? d1 : d2)
-      const b = stripByDepth(v[1], v[1] in data.dependencies ? d1 : d2)
+      const a = stripByDepth(v[0], v[0] in data.dependencies ? d1 : d2, dependencyInfo.moduleSeparator)
+      const b = stripByDepth(v[1], v[1] in data.dependencies ? d1 : d2, dependencyInfo.moduleSeparator)
       if (a && b && a !== b) deps.push([a, b])
     }
     data.flatDependencies = []
@@ -159,11 +159,10 @@ function generateDependencies (data: DependencyData) {
   return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
 }
 
-function stripByDepth (s: string, depth: number) {
+function stripByDepth (s: string, depth: number, separator: string) {
   if (depth === 0) return s
-  const splitter = s.indexOf('.') >= 0 ? '.' : '/'
-  const arr = s.split(/\.|\//)
-  return arr.slice(0, depth).join(splitter)
+  const arr = s.split(separator)
+  return arr.slice(0, depth).join(separator)
 }
 
 function generateDGML (data: DependencyData) {

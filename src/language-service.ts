@@ -1,7 +1,17 @@
+import { exception } from 'console'
 import * as fs from 'fs'
 import * as path from 'path'
 // import xmldoc from 'xmldoc'
 import * as util from './util.js'
+
+type ParseContext = {
+  rootDir: string,
+  files: string[],
+  currentFile: string,
+  fileContent: string,
+  lineNumber: number,
+  line: string
+}
 
 type ParseResult = {
   module?: string,
@@ -15,7 +25,8 @@ export type DependencyInfo = {
   pathDependencies: { [id: string]: string[] }
   moduleDependencies: { [id: string]: string[] }
   pathHierarchy: util.RecursiveObject,
-  moduleHierarchy: util.RecursiveObject
+  moduleHierarchy: util.RecursiveObject,
+  moduleSeparator: string
 }
 
 interface LanguageService {
@@ -23,7 +34,7 @@ interface LanguageService {
   exts: string[]
   desc?: string
   moduleSeparator?: string
-  parse(dir: string, files: string[], f: string, fileContent: string, lineNumber: number, line: string): ParseResult
+  parse(context: ParseContext): ParseResult
   getResolveCandidates?(f: string) : string[]
 }
 
@@ -31,11 +42,11 @@ const jsLanguageService: LanguageService = {
   name: 'javascript',
   desc: 'javascript',
   exts: ['.js', '.cjs', '.mjs', '.vue'],
-  parse: function (rootDir: string, files: string[], f: string, fileContent: string, lineNumber: number, line: string) {
+  parse: function (context: ParseContext) {
     const dependencies: string[] = []
-    let r = line.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
+    let r = context.line.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
     if (r) dependencies.push(r[1])
-    r = line.match(/(require|import)\s*\(['"]([^'"]+)['"]\)/)
+    r = context.line.match(/(require|import)\s*\(['"]([^'"]+)['"]\)/)
     if (r) dependencies.push(r[2])
     return { pathDependencies: dependencies }
   },
@@ -51,14 +62,15 @@ const jsLanguageService: LanguageService = {
 const javaLanguageService: LanguageService = {
   name: 'java',
   exts: ['.java'],
-  parse: function (dir: string, files: string[], f: string, fileContent: string, lineNumber: number, line: string) {
+  moduleSeparator: '.',
+  parse: function (context: ParseContext) {
     const dependencies = []
     let module
-    let r = line.match(/^package (.*);$/)
+    let r = context.line.match(/^package (.*);$/)
     if (r) {
-      module = r[1] + '.' + path.parse(f).name
+      module = r[1] + '.' + path.parse(context.currentFile).name
     }
-    r = line.match(/^import( static)? (.*);$/)
+    r = context.line.match(/^import( static)? (.*);$/)
     if (r) {
       dependencies.push(r[2])
     }
@@ -69,9 +81,37 @@ const javaLanguageService: LanguageService = {
   }
 }
 
+const CLanguageService = {
+  name: 'C',
+  exts: ['.c', '.cpp', '.h', '.hpp', '.cxx', '.cc', '.hh', '.m'],
+  parse: function (context: ParseContext) {
+    const dependencies = []
+    let module
+    let r = context.line.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
+    if (r) dependencies.push(r[1])
+    r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
+    if (r) dependencies.push(r[1])
+    if (context.lineNumber === 1) {
+      const base = this.stripExt(context.currentFile)
+      if (context.files.find(f => f !== context.currentFile && this.stripExt(f) === base)) {
+        module = base
+      }
+    }
+    return {
+      module: module,
+      pathDependencies: dependencies
+    }
+  },
+  stripExt: function (filename: string) {
+    const ext = path.extname(filename)
+    return filename.slice(0, -ext.length)
+  }
+}
+
 const languageServiceRegistry: LanguageService[] = [
   jsLanguageService,
-  javaLanguageService
+  javaLanguageService,
+  CLanguageService
 ]
 
 /**
@@ -118,35 +158,51 @@ export function getLanguageSummary () {
     .join('\n')
 }
 
-export function parse (dir: string, files: string[], language?: string) {
+export function parse (dir: string, files: string[], language: string, scanAll?: boolean) {
+  const ls = languageServiceRegistry.find(s => s.name === language)
+  if (!ls) {
+    throw Error(`unsupported language: ${language}`)
+  }
+
   const data: DependencyInfo = {
     path2module: {},
     module2path: {},
     pathDependencies: {},
     moduleDependencies: {},
     pathHierarchy: {},
-    moduleHierarchy: {}
+    moduleHierarchy: {},
+    moduleSeparator: ls.moduleSeparator || '/'
+  }
+
+  const context: ParseContext = {
+    rootDir: dir,
+    files: files,
+    currentFile: '',
+    fileContent: '',
+    lineNumber: 0,
+    line: ''
   }
 
   for (const f of files) {
+    context.currentFile = f
     const pathDependencies = []
     const moduleDependencies = []
     let module = ''
     const parent = path.dirname(f)
     const ext = path.extname(f)
-    const ls = language
-      ? languageServiceRegistry.find(s => s.name === language)
-      : languageServiceRegistry.find(s => s.exts.indexOf(ext) >= 0)
-    if (ls === undefined) {
+    if (!scanAll && ls.exts.indexOf(ext) === 0) {
       // not a recognizable source file
       continue
     }
 
     const fullName = dir + '/' + f
     const content = fs.readFileSync(fullName, 'utf-8')
+    context.fileContent = content
     const lines = content.split(/\r?\n/)
     for (let i = 0; i < lines.length; i++) {
-      const info = ls.parse(dir, files, f, content, i + 1, lines[i])
+      context.line = lines[i]
+      context.lineNumber = i + 1
+      const info = ls.parse(context)
       if (info.pathDependencies) {
         for (const d of info.pathDependencies) {
           const basename = joinPath(parent, cancelDot(d))
@@ -157,7 +213,6 @@ export function parse (dir: string, files: string[], language?: string) {
       }
       if (info.moduleDependencies) {
         moduleDependencies.push(...info.moduleDependencies)
-        util.buildHierarchy(info.moduleDependencies, ls.moduleSeparator || '/', data.moduleHierarchy)
       }
       // resolve dependencies
       if (info.module) {
@@ -189,6 +244,11 @@ export function parse (dir: string, files: string[], language?: string) {
   for (const f of Object.keys(data.pathDependencies)) {
     data.pathDependencies[f] = [...new Set(data.pathDependencies[f])]
     util.buildHierarchy([f, ...data.pathDependencies[f]], '/', data.pathHierarchy)
+  }
+
+  for (const m of Object.keys(data.moduleDependencies)) {
+    data.moduleDependencies[m] = [...new Set(data.moduleDependencies[m])]
+    util.buildHierarchy([m, ...data.moduleDependencies[m]], ls.moduleSeparator || '/', data.moduleHierarchy)
   }
 
   return data
