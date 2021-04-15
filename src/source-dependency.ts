@@ -38,10 +38,12 @@ function main () {
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
       v: { type: 'boolean', conflicts: ['f', 'o'], describe: 'create visjs html file in tmp folder and then open it with default program' },
       a: { type: 'boolean', describe: 'scan for all files. ' },
+      strict: {type: 'boolean', describe: 'strict match for dependencies' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
       f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js", "vis"' },
-      o: { type: 'string', alias: 'output', describe: 'output file. output format is deduced by ext if not given.' }
+      o: { type: 'string', alias: 'output', describe: 'output file. output format is deduced by ext if not given.' },
+      p: { type: 'boolean', alias: 'pathdep', describe: 'use path dependency even if module dependency is available' }
     }).argv
 
   // console.log(argv);
@@ -78,11 +80,16 @@ function main () {
   const targetIsFile = fs.lstatSync(target).isFile()
   const dir = targetIsFile ? path.dirname(target) : target
   const files = targetIsFile ? [target] : util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
-  const dependencyInfo = ls.parse(dir, files, argv.l, argv.a)
+  const dependencyInfo = ls.parse(dir, files, argv.l, argv.a || false, argv.strict || false)
 
   // use path dependencies currently
   data.dependencies = dependencyInfo.pathDependencies
   data.contains = dependencyInfo.pathHierarchy
+
+  if (Object.keys(dependencyInfo.moduleDependencies).length > 0 && !argv.p) {
+    data.dependencies = dependencyInfo.moduleDependencies
+    data.contains = dependencyInfo.moduleHierarchy
+  }
 
   if (argv.inner) {
     for (const k of Object.keys(data.dependencies)) {

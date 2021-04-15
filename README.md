@@ -28,10 +28,23 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 
 ![demo](demo.gif)
 
+### gallary
+
+#### linphone 3.6.1 (C)
+
+![linphone](doc/gallary/linphone3.6.1.png)
+
+#### ffmpeg (C)
+
+![ffmpeg](doc/gallary/ffmpeg.png)
+
+#### es-abstract (javascript)
+
+![es-abstract](doc/gallary/es-abstract.png)
+
 ## road map
 
 | feature        | description                                                  | timeline |
 |----------------|--------------------------------------------------------------|----------|
-| cross-language | true `file level` dependency and deduce file language by ext | 2021 Q1  |
 | top10          | support top 10 language in TOIBE index                       | 2021 Q2  |
 | top50          | support top 50 language in TOIBE index                       | 2021 Q3  |

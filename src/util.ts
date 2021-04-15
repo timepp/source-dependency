@@ -65,13 +65,13 @@ export function buildHierarchy (arr: string[], separator: string, hierarchy: Rec
 }
 
 export function walkHierarchy (hierarchy: RecursiveObject, visitor: (parent: string, child: string) => void, myName?: string) {
-  for (const key in Object.keys(hierarchy)) {
+  for (const key of Object.keys(hierarchy)) {
     if (myName !== undefined) {
       visitor(myName, key)
-      const child = hierarchy[key]
-      if (child) {
-        walkHierarchy(child, visitor, key)
-      }
+    }
+    const child = hierarchy[key]
+    if (child) {
+      walkHierarchy(child, visitor, key)
     }
   }
 }

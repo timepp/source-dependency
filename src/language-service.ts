@@ -95,6 +95,8 @@ const CLanguageService = {
       const base = this.stripExt(context.currentFile)
       if (context.files.find(f => f !== context.currentFile && this.stripExt(f) === base)) {
         module = base
+      } else {
+        module = context.currentFile
       }
     }
     return {
@@ -132,11 +134,19 @@ function cancelDot (s: string) {
   return r.join('/')
 }
 
-function resolvePath (files: string[], candidates: string[]) {
+function resolvePath (files: string[], parent: string, candidates: string[], strictMatch: boolean) {
   for (const c of candidates) {
-    const f = cancelDot(c)
-    if (files.indexOf(f) >= 0) {
-      return f
+    const cc = cancelDot(c)
+    const pc = joinPath(parent, cc)
+    const result = files.find(f => {
+      if (strictMatch) {
+        return f === pc
+      } else {
+        return f === cc || f.endsWith('/' + cc)
+      }
+    })
+    if (result) {
+      return result
     }
   }
   return null
@@ -158,7 +168,7 @@ export function getLanguageSummary () {
     .join('\n')
 }
 
-export function parse (dir: string, files: string[], language: string, scanAll?: boolean) {
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean) {
   const ls = languageServiceRegistry.find(s => s.name === language)
   if (!ls) {
     throw Error(`unsupported language: ${language}`)
@@ -190,7 +200,7 @@ export function parse (dir: string, files: string[], language: string, scanAll?:
     let module = ''
     const parent = path.dirname(f)
     const ext = path.extname(f)
-    if (!scanAll && ls.exts.indexOf(ext) === 0) {
+    if (!scanAll && ls.exts.indexOf(ext) < 0) {
       // not a recognizable source file
       continue
     }
@@ -205,9 +215,9 @@ export function parse (dir: string, files: string[], language: string, scanAll?:
       const info = ls.parse(context)
       if (info.pathDependencies) {
         for (const d of info.pathDependencies) {
-          const basename = joinPath(parent, cancelDot(d))
-          const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(basename) : []
-          const resolvedPath = resolvePath(files, [basename, ...candidates]) || '*external*/' + d
+          const cd = cancelDot(d)
+          const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
+          const resolvedPath = resolvePath(files, parent, [cd, ...candidates], strictMatch) || '*external*/' + d
           pathDependencies.push(resolvedPath)
         }
       }
@@ -223,10 +233,12 @@ export function parse (dir: string, files: string[], language: string, scanAll?:
     }
 
     data.pathDependencies[f] = pathDependencies
-    data.moduleDependencies[module] = moduleDependencies
+    if (module) {
+      data.moduleDependencies[module] = moduleDependencies
+    }
   }
 
-  // file dependencies can be built from module dependencies (if any)
+  // path dependencies can be built from module dependencies (if any)
   for (const d of Object.keys(data.moduleDependencies)) {
     const f = data.module2path[d]
     if (f) {
@@ -241,13 +253,30 @@ export function parse (dir: string, files: string[], language: string, scanAll?:
     }
   }
 
+  // module dependencies can be built from path dependencies
+  for (const p of Object.keys(data.pathDependencies)) {
+    const m = data.path2module[p]
+    if (m) {
+      const modules = data.pathDependencies[p].map( v => data.path2module[v] || v)
+      if (modules.length > 0) {
+        if (m in data.moduleDependencies) {
+          data.moduleDependencies[m].push(...modules)
+        } else {
+          data.moduleDependencies[m] = modules
+        }
+      }
+    }
+  }
+
   for (const f of Object.keys(data.pathDependencies)) {
     data.pathDependencies[f] = [...new Set(data.pathDependencies[f])]
     util.buildHierarchy([f, ...data.pathDependencies[f]], '/', data.pathHierarchy)
   }
 
   for (const m of Object.keys(data.moduleDependencies)) {
-    data.moduleDependencies[m] = [...new Set(data.moduleDependencies[m])]
+    const depset = new Set(data.moduleDependencies[m])
+    depset.delete(m)
+    data.moduleDependencies[m] = [...depset]
     util.buildHierarchy([m, ...data.moduleDependencies[m]], ls.moduleSeparator || '/', data.moduleHierarchy)
   }
 
