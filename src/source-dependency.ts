@@ -7,7 +7,6 @@ import * as os from 'os'
 import open from 'open'
 import * as ls from './language-service.js'
 import * as util from './util.js'
-import { visjsTemplate } from './visualize.js'
 
 type RecursiveObject = {
   [key: string]: any
@@ -244,7 +243,8 @@ function generateVisJs (data: DependencyData) {
   const nodeNames = [...new Set(data.flatDependencies.flat())]
   const nodes = nodeNames.map(v => { return { id: v, label: v, shape: 'box' } })
   const edges = data.flatDependencies.map(v => { return { from: v[0], to: v[1], arrows: 'to' } })
-  const html = visjsTemplate.replace('__NODES', JSON.stringify(nodes)).replace('__EDGES', JSON.stringify(edges))
+  const template = fs.readFileSync(new URL('./vis_template.html', import.meta.url), 'utf-8')
+  const html = template.replace('__NODES', JSON.stringify(nodes)).replace('__EDGES', JSON.stringify(edges))
   return html
 }
 

@@ -2,9 +2,11 @@
 
 A simple tool to get rough source code dependencies inside your app.
 
-The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup / know many tools before using it for different languages.
+The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup, you do not need to know many specific tools for specific language.
 
-In the meanwhile, this tool only do lexical parsing on source file, so the result is not always very accurate.
+Of course the easy usage is achieved by sacrificing the accuracy. This tool only do lexical parsing, so won't be 100% accurate for complex constructs. However the accuracy is very good in practice, please see the gallery below for more usage examples.
+
+The best dependency viewer is MS dgml viewer. It's only available on Windows. On Linux/Mac use dot or integrated visjs.
 
 ## install
 
@@ -28,19 +30,23 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 
 ![demo](demo.gif)
 
-### gallary
+### gallery
 
-#### linphone 3.6.1 (C)
+#### linphone 3.6.1 (VS dgml viewer)
 
-![linphone](doc/gallary/linphone3.6.1.png)
+![linphone](doc/gallery/linphone3.6.1.png)
 
-#### ffmpeg (C)
+#### ffmpeg (VS dgml viewer)
 
-![ffmpeg](doc/gallary/ffmpeg.png)
+![ffmpeg](doc/gallery/ffmpeg.png)
 
-#### es-abstract (javascript)
+#### es-abstract (VS dgml viewer)
 
-![es-abstract](doc/gallary/es-abstract.png)
+![es-abstract](doc/gallery/es-abstract.png)
+
+#### this project (visjs)
+
+![this project](doc/gallery/visjs.png)
 
 ## road map
 
@@ -48,3 +54,5 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 |----------------|--------------------------------------------------------------|----------|
 | top10          | support top 10 language in TOIBE index                       | 2021 Q2  |
 | top50          | support top 50 language in TOIBE index                       | 2021 Q3  |
+
+welcome to send pull request to add support for any other language.
