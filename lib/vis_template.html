@@ -1,189 +1,157 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <title>Vis Network | Other | Clustering by Zoom Level</title>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.js" integrity="sha512-GE9mKnPrTn2DY5AZuIC9yE6K4FF8T+9lsO7jwHn+RW9rEjnHzF/in0oGwlPzRwjhQ+oJiawmtfvleX+l6h5/cA==" crossorigin="anonymous"></script>
+<head>
+  <title>Vis Network | Other | Clustering by Zoom Level</title>
 
-    <style type="text/css">
-      #mynetwork {
-        width: 100%;
-        height: 600px;
-        border: 1px solid lightgray;
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.js"
+    integrity="sha512-GE9mKnPrTn2DY5AZuIC9yE6K4FF8T+9lsO7jwHn+RW9rEjnHzF/in0oGwlPzRwjhQ+oJiawmtfvleX+l6h5/cA=="
+    crossorigin="anonymous"></script>
+
+  <style type="text/css">
+    html,
+    body {
+      height: 100%
+    }
+
+    #mynetwork {
+      width: 100%;
+      height: 95%;
+      border: 1px solid lightgray;
+    }
+
+    p {
+      max-width: 600px;
+    }
+
+    h4 {
+      margin-bottom: 3px;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="mynetwork"></div>
+
+  <script type="text/javascript">
+    var clusterIndex = 0;
+    var clusters = [];
+    var lastClusterZoomLevel = 0;
+    var clusterFactor = 0.9;
+
+    try {
+      // create an array with nodes
+      // [{id:string, label:string}]
+      var nodes = __NODES;
+
+      // create an array with edges
+      // [{from:string, to:string}]
+      var edges = __EDGES;
+    }
+    catch (e) {
+      // sample data for test
+      var nodes = [{ "id": "lib/language-service.js", "label": "lib/language-service.js", "shape": "box" }, { "id": "*external*/fs", "label": "*external*/fs", "shape": "box" }, { "id": "*external*/path", "label": "*external*/path", "shape": "box" }, { "id": "lib/util.js", "label": "lib/util.js", "shape": "box" }, { "id": "lib/source-dependency.js", "label": "lib/source-dependency.js", "shape": "box" }, { "id": "*external*/yargs", "label": "*external*/yargs", "shape": "box" }, { "id": "*external*/os", "label": "*external*/os", "shape": "box" }, { "id": "*external*/open", "label": "*external*/open", "shape": "box" }];
+      var edges = [{ "from": "lib/language-service.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/language-service.js", "to": "*external*/path", "arrows": "to" }, { "from": "lib/language-service.js", "to": "lib/util.js", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/yargs", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/path", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/os", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/open", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "lib/language-service.js", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "lib/util.js", "arrows": "to" }, { "from": "lib/util.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/util.js", "to": "*external*/path", "arrows": "to" }];
+    }
+
+    nodes = nodes.map(v => {
+      if (v.id.startsWith('*external*')) {
+        return { ...v, color: { background: '#CCCCCC' } }
+      } else {
+        return v
       }
-
-      p {
-        max-width: 600px;
+    })
+    edges = edges.map(e => {
+      if (e.to.startsWith('*external*')) {
+        return { ...e, color: { color: '#CCCCCC' } }
+      } else {
+        return e
       }
+    })
 
-      h4 {
-        margin-bottom: 3px;
-      }
-    </style>
-  </head>
+    // create a network
+    var container = document.getElementById("mynetwork");
+    var data = {
+      nodes: nodes,
+      edges: edges,
+    };
 
-  <body>
-    <p>You can zoom in and out to cluster/decluster.</p>
-    Stabilize when clustering:<input type="checkbox" id="stabilizeCheckbox" />
-    <div id="mynetwork"></div>
-
-    <script type="text/javascript">
-      var clusterIndex = 0;
-      var clusters = [];
-      var lastClusterZoomLevel = 0;
-      var clusterFactor = 0.9;
-
-      try {
-        // create an array with nodes
-        // [{id:string, label:string}]
-        var nodes = __NODES;
-
-        // create an array with edges
-        // [{from:string, to:string}]
-        var edges = __EDGES;
-      }
-      catch (e) {
-        // sample data for test
-        var nodes = [{"id":"lib/language-service.js","label":"lib/language-service.js","shape":"box"},{"id":"*external*/fs","label":"*external*/fs","shape":"box"},{"id":"*external*/path","label":"*external*/path","shape":"box"},{"id":"lib/util.js","label":"lib/util.js","shape":"box"},{"id":"lib/source-dependency.js","label":"lib/source-dependency.js","shape":"box"},{"id":"*external*/yargs","label":"*external*/yargs","shape":"box"},{"id":"*external*/os","label":"*external*/os","shape":"box"},{"id":"*external*/open","label":"*external*/open","shape":"box"}];
-        var edges = [{"from":"lib/language-service.js","to":"*external*/fs","arrows":"to"},{"from":"lib/language-service.js","to":"*external*/path","arrows":"to"},{"from":"lib/language-service.js","to":"lib/util.js","arrows":"to"},{"from":"lib/source-dependency.js","to":"*external*/fs","arrows":"to"},{"from":"lib/source-dependency.js","to":"*external*/yargs","arrows":"to"},{"from":"lib/source-dependency.js","to":"*external*/path","arrows":"to"},{"from":"lib/source-dependency.js","to":"*external*/os","arrows":"to"},{"from":"lib/source-dependency.js","to":"*external*/open","arrows":"to"},{"from":"lib/source-dependency.js","to":"lib/language-service.js","arrows":"to"},{"from":"lib/source-dependency.js","to":"lib/util.js","arrows":"to"},{"from":"lib/util.js","to":"*external*/fs","arrows":"to"},{"from":"lib/util.js","to":"*external*/path","arrows":"to"}];
-      }
-
-      nodes = nodes.map(v => {
-        if (v.id.startsWith('*external*')) {
-          return {...v, color:{background:'#CCCCCC'}}
-        } else {
-          return v
+    var options = {
+      layout: {
+        randomSeed: undefined,
+        improvedLayout: true,
+        clusterThreshold: 150,
+        hierarchical: {
+          enabled: false,
+          levelSeparation: 150,
+          nodeSpacing: 300,
+          treeSpacing: 200,
+          blockShifting: true,
+          edgeMinimization: true,
+          parentCentralization: true,
+          direction: 'UD',        // UD, DU, LR, RL
+          sortMethod: 'directed',  // hubsize, directed
+          shakeTowards: 'roots'  // roots, leaves
         }
-      })
-      edges = edges.map(e => {
-        if (e.to.startsWith('*external*')) {
-          return {...e, color: {color:'#CCCCCC'}}
-        } else {
-          return e
-        }
-      })
-      // create hidden edges that link all externals
-      for (let i = 0; i < nodes.length; i++) for (let j = i+1; j < nodes.length; j++) {
-        const a = nodes[i]
-        const b = nodes[j]
-        if (a.id.startsWith('*external*') && b.id.startsWith('*external*')) {
-          edges.push({
-            from: a.id,
-            to: b.id,
-            hidden: true
-          })
-        }
-      }
-
-      // create a network
-      var container = document.getElementById("mynetwork");
-      var data = {
-        nodes: nodes,
-        edges: edges,
-      };
-      var options = {
-
-    physics: {
-      enabled:false,
-      //barnesHut: {
-      //  avoidOverlap: 1
-      //}
-    },
-        edges: {
-            //smooth: {
-            //    enabled: true,
-            //    type: "dynamic"
-            //}
+      },
+      physics: {
+        hierarchicalRepulsion: {
+          avoidOverlap: 1,
         },
-        nodes: {
-            font: {
-                size: 12
+      },
+
+      edges: {
+        smooth: {
+          enabled: true,
+          type: "dynamic"
+        }
+      },
+      nodes: {
+        font: {
+          size: 12
+        }
+      }
+    };
+    var network = new vis.Network(container, data, options);
+
+    // if we click on a node, we want to open it up!
+    network.on("selectNode", function (params) {
+      if (params.nodes.length == 1) {
+        console.log(params)
+        // normal click = open cluster
+        // shift + click = create cluster
+        const shiftDown = params.event.srcEvent.shiftKey
+        const node = params.nodes[0]
+        if (shiftDown) {
+          // cluster all nodes with same level
+          const folder = node.split('/').slice(0, -1).join('/')
+          network.clustering.cluster({
+            joinCondition: function (nodeOptions) {
+              return nodeOptions.id.startsWith(folder + '/')
+            },
+            clusterNodeProperties: {
+              color: {
+                background: '#CCCCFF',
+                border: '#80FF80'
+              },
+              id: folder,
+              label: folder,
+              shape: 'box'
             }
-        }
-      };
-      var network = new vis.Network(container, data, options);
-
-      // set the first initial zoom level
-      network.once("initRedraw", function () {
-        if (lastClusterZoomLevel === 0) {
-          lastClusterZoomLevel = network.getScale();
-        }
-      });
-
-      // we use the zoom event for our clustering
-      network.on("zoom", function (params) {
-        if (params.direction == "-") {
-          if (params.scale < lastClusterZoomLevel * clusterFactor) {
-            makeClusters(params.scale);
-            lastClusterZoomLevel = params.scale;
-          }
+          })
         } else {
-          openClusters(params.scale);
-        }
-      });
-
-      // if we click on a node, we want to open it up!
-      network.on("selectNode", function (params) {
-        if (params.nodes.length == 1) {
-          if (network.isCluster(params.nodes[0]) == true) {
-            network.openCluster(params.nodes[0]);
+          if (network.isCluster(node)) {
+            network.openCluster(node);
           }
         }
-      });
-
-      // make the clusters
-      function makeClusters(scale) {
-        var clusterOptionsByData = {
-          processProperties: function (clusterOptions, childNodes) {
-            clusterIndex = clusterIndex + 1;
-            var childrenCount = 0;
-            for (var i = 0; i < childNodes.length; i++) {
-              childrenCount += childNodes[i].childrenCount || 1;
-            }
-            clusterOptions.childrenCount = childrenCount;
-            clusterOptions.label = "# " + childrenCount + "";
-            clusterOptions.font = { size: childrenCount * 5 + 30 };
-            clusterOptions.id = "cluster:" + clusterIndex;
-            clusters.push({ id: "cluster:" + clusterIndex, scale: scale });
-            return clusterOptions;
-          },
-          clusterNodeProperties: {
-            borderWidth: 3,
-            shape: "database",
-            font: { size: 30 },
-          },
-        };
-        network.clusterOutliers(clusterOptionsByData);
-        if (document.getElementById("stabilizeCheckbox").checked === true) {
-          // since we use the scale as a unique identifier, we do NOT want to fit after the stabilization
-          network.setOptions({ physics: { stabilization: { fit: false } } });
-          network.stabilize();
-        }
       }
+    });
 
-      // open them back up!
-      function openClusters(scale) {
-        var newClusters = [];
-        var declustered = false;
-        for (var i = 0; i < clusters.length; i++) {
-          if (clusters[i].scale < scale) {
-            network.openCluster(clusters[i].id);
-            lastClusterZoomLevel = scale;
-            declustered = true;
-          } else {
-            newClusters.push(clusters[i]);
-          }
-        }
-        clusters = newClusters;
-        if (
-          declustered === true &&
-          document.getElementById("stabilizeCheckbox").checked === true
-        ) {
-          // since we use the scale as a unique identifier, we do NOT want to fit after the stabilization
-          network.setOptions({ physics: { stabilization: { fit: false } } });
-          network.stabilize();
-        }
-      }
-    </script>
-  </body>
+    function makeClusters() {
+      
+    }
+
+  </script>
+</body>
+
 </html>
