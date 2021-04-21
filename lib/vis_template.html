@@ -31,6 +31,10 @@
 </head>
 
 <body>
+  <div id="description"> 
+    CTRL + mouse click = expand cluster <br>
+    SHIFT + mouse click = collapse same level nodes to a new cluster
+  </div>
   <div id="mynetwork"></div>
 
   <script type="text/javascript">
@@ -50,8 +54,18 @@
     }
     catch (e) {
       // sample data for test
-      var nodes = [{ "id": "lib/language-service.js", "label": "lib/language-service.js", "shape": "box" }, { "id": "*external*/fs", "label": "*external*/fs", "shape": "box" }, { "id": "*external*/path", "label": "*external*/path", "shape": "box" }, { "id": "lib/util.js", "label": "lib/util.js", "shape": "box" }, { "id": "lib/source-dependency.js", "label": "lib/source-dependency.js", "shape": "box" }, { "id": "*external*/yargs", "label": "*external*/yargs", "shape": "box" }, { "id": "*external*/os", "label": "*external*/os", "shape": "box" }, { "id": "*external*/open", "label": "*external*/open", "shape": "box" }];
-      var edges = [{ "from": "lib/language-service.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/language-service.js", "to": "*external*/path", "arrows": "to" }, { "from": "lib/language-service.js", "to": "lib/util.js", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/yargs", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/path", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/os", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "*external*/open", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "lib/language-service.js", "arrows": "to" }, { "from": "lib/source-dependency.js", "to": "lib/util.js", "arrows": "to" }, { "from": "lib/util.js", "to": "*external*/fs", "arrows": "to" }, { "from": "lib/util.js", "to": "*external*/path", "arrows": "to" }];
+      const sample_data = `
+        a -> *external*/x/y, b -> *external*/x/z, c -> *external*/vvv, a -> h/i/j, h/x -> h/i/k, a -> b, h/x -> h/l/u, a -> h/x, h/i/j -> c,
+        h/x -> *external*/yyy, h/i/j -> h/l/u
+      `
+      var nodes = [... new Set(sample_data.split(/,|->/g).map(v => v.trim()))].map(v => { return {id: v, label: v}})
+      var edges = sample_data.split(/,/g).map(v => {
+        const arr = v.split('->')
+        return {
+          from: arr[0].trim(),
+          to: arr[1].trim()
+        }
+      })
     }
 
     nodes = nodes.map(v => {
@@ -79,8 +93,7 @@
     var options = {
       layout: {
         randomSeed: undefined,
-        improvedLayout: true,
-        clusterThreshold: 150,
+        improvedLayout: false,
         hierarchical: {
           enabled: false,
           levelSeparation: 150,
@@ -91,36 +104,32 @@
           parentCentralization: true,
           direction: 'UD',        // UD, DU, LR, RL
           sortMethod: 'directed',  // hubsize, directed
-          shakeTowards: 'roots'  // roots, leaves
-        }
-      },
-      physics: {
-        hierarchicalRepulsion: {
-          avoidOverlap: 1,
-        },
-      },
-
-      edges: {
-        smooth: {
-          enabled: true,
-          type: "dynamic"
-        }
-      },
-      nodes: {
-        font: {
-          size: 12
         }
       }
     };
-    var network = new vis.Network(container, data, options);
+
+    var network = new vis.Network(container, data, {});
+    network.setOptions({
+      edges: {
+        arrows: 'to',
+        shadow: true,
+        smooth: true,
+        color: {
+          color: '#303030',
+          highlight: '#1010FF'
+        }
+      },
+      nodes: {
+        shape: 'box',
+        shadow: true
+      }
+    })
 
     // if we click on a node, we want to open it up!
-    network.on("selectNode", function (params) {
+    network.on("click", function (params) {
       if (params.nodes.length == 1) {
-        console.log(params)
-        // normal click = open cluster
-        // shift + click = create cluster
         const shiftDown = params.event.srcEvent.shiftKey
+        const ctrlDown = params.event.srcEvent.ctrlKey
         const node = params.nodes[0]
         if (shiftDown) {
           // cluster all nodes with same level
@@ -139,7 +148,7 @@
               shape: 'box'
             }
           })
-        } else {
+        } else if (ctrlDown) {
           if (network.isCluster(node)) {
             network.openCluster(node);
           }
