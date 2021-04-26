@@ -4,9 +4,7 @@
 <head>
   <title>Vis Network | Other | Clustering by Zoom Level</title>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.js"
-    integrity="sha512-GE9mKnPrTn2DY5AZuIC9yE6K4FF8T+9lsO7jwHn+RW9rEjnHzF/in0oGwlPzRwjhQ+oJiawmtfvleX+l6h5/cA=="
-    crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
   <style type="text/css">
     html,
@@ -31,21 +29,16 @@
 </head>
 
 <body>
-  <div id="progress">
-
-  </div>
-  <div id="description"> 
-    CTRL + mouse click = expand cluster <br>
-    SHIFT + mouse click = collapse same level nodes to a new cluster
+  <div id="tool"> 
+    <button id="collapse">collapse same level (shift+click)</button> &nbsp;
+    <button id="expand">expand (alt+click)</button> &nbsp;
+    <button id="expandAll">expand all children</button> &nbsp;
+    <button id="delete">delete</button> &nbsp;
+    <span id="progress"></span>
   </div>
   <div id="mynetwork"></div>
 
   <script type="text/javascript">
-    var clusterIndex = 0;
-    var clusters = [];
-    var lastClusterZoomLevel = 0;
-    var clusterFactor = 0.9;
-
     try {
       // create an array with nodes
       // [{id:string, label:string}]
@@ -58,8 +51,8 @@
     catch (e) {
       // sample data for test
       const sample_data = `
-        a -> *external*/x/y, b -> *external*/x/z, c -> *external*/vvv, a -> h/i/j, h/x -> h/i/k, a -> b, h/x -> h/l/u, a -> h/x, h/i/j -> c,
-        h/x -> *external*/yyy, h/i/j -> h/l/u
+        a -> *external*/x/y, b -> *external*/x/z, c -> *external*/vvv, a -> h/i/j, t/x -> h/i/k, a -> b, t/x -> h/l/u, a -> h/l/v, h/i/j -> c,
+        t/x -> *external*/yyy, h/i/j -> h/l/u, a -> t/x
       `
       var nodes = [... new Set(sample_data.split(/,|->/g).map(v => v.trim()))].map(v => { return {id: v, label: v}})
       var edges = sample_data.split(/,/g).map(v => {
@@ -94,29 +87,29 @@
     };
 
     var options = {
-      layout: {
-        randomSeed: undefined,
-        improvedLayout: false,
-        hierarchical: {
-          enabled: false,
-          levelSeparation: 150,
-          nodeSpacing: 300,
-          treeSpacing: 200,
-          blockShifting: true,
-          edgeMinimization: true,
-          parentCentralization: true,
-          direction: 'UD',        // UD, DU, LR, RL
-          sortMethod: 'directed',  // hubsize, directed
-        }
-      }
+      
+        physics: {
+        barnesHut: {
+            gravitationalConstant: -3900,
+            centralGravity: 0,
+            springConstant: 0.01,
+            springLength: 100,
+            theta: 0.1
+        },
+        minVelocity: 1
+        },
+      autoResize: true,
     };
 
-    var network = new vis.Network(container, data, {});
+    // clusters will be made dynamically
+    const clusters = []
+
+    var network = new vis.Network(container, data, options);
     network.setOptions({
       edges: {
         arrows: 'to',
         shadow: true,
-        smooth: true,
+        //smooth: true,
         color: {
           color: '#303030',
           highlight: '#1010FF'
@@ -125,9 +118,6 @@
       nodes: {
         shape: 'box',
         shadow: true
-      },
-      interaction: {
-        keyboard: true
       }
     })
 
@@ -148,34 +138,23 @@
 
     makeClusters()
 
+    network.on('doubleClick', function (params) {
+      if (params.nodes.length == 1) {
+        const node = params.nodes[0]
+        if (network.isCluster(node)) {
+            network.openCluster(node);
+          }
+      }
+    })
+
     // if we click on a node, we want to open it up!
     network.on("click", function (params) {
       if (params.nodes.length == 1) {
         const shiftDown = params.event.srcEvent.shiftKey
-        const ctrlDown = params.event.srcEvent.ctrlKey
         const node = params.nodes[0]
         if (shiftDown) {
           // cluster all nodes with same level
-          const folder = node.split('/').slice(0, -1).join('/')
-          network.cluster({
-            joinCondition: function (nodeOptions) {
-              const inFolder = nodeOptions.id.startsWith(folder + '/')
-              if (inFolder) {
-                const path = network.clustering.findNode(nodeOptions.id)
-                // check if the node is already in cluster
-                if (path.length === 1) {
-                  console.log(`folder: ${folder}, node: ${nodeOptions.id}, join: true`)
-                  return true
-                }
-              }
-              return false
-            },
-            clusterNodeProperties: createClusterProp(folder)
-          })
-        } else if (ctrlDown) {
-          if (network.isCluster(node)) {
-            network.openCluster(node);
-          }
+          collapseSameLevel(node)
         }
       }
     })
@@ -187,19 +166,73 @@
       document.getElementById('progress').innerText = `stabilized (took ${params.iterations} iterations)`
     })
 
-    var canvas = container.getElementsByTagName('canvas')[0]
-    var keys = vis.keycharm({container:document.body, preventDefault: false})
-    keys.bind('delete', function(){
-      console.log('delete')
-      network.deleteSelected()
-    })
+    document.getElementById("delete").onclick = deleteSelectedNode
+    document.getElementById("expand").onclick = () => expandNode(getSingleSelection())
+    document.getElementById("expandAll").onclick = () => expandNodeRecursively(getSingleSelection())
+    document.getElementById("collapse").onclick = () => collapseSameLevel(getSingleSelection())
+
+    function deleteSelectedNode() {
+      const node = getSingleSelection()
+      if (!node) return
+      if (network.isCluster(node)) {
+        const childnodes = expandNodeRecursively(node)
+        network.selectNodes(childnodes)
+        network.deleteSelected()
+      } else {
+        network.deleteSelected()
+      }
+    }
+
+    function expandNodeRecursively(node) {
+      if (!node) return []
+      if (!network.isCluster(node)) return [node]
+      const childnodes = network.getNodesInCluster(node)
+      network.openCluster(node)
+      const ret = []
+      for (const n of childnodes) {
+        ret.push(...expandNodeRecursively(n))
+      }
+      return ret
+    }
+
+    function expandNode(node) {
+      if (!node) return
+      if (network.isCluster(node)) {
+        network.openCluster(node);
+      }
+    }
+
+    function collapseSameLevel(node) {
+      if (!node) return
+      const folder = node.split('/').slice(0, -1).join('/')
+      network.cluster({
+        joinCondition: function (nodeOptions) {
+          const inFolder = nodeOptions.id.startsWith(folder + '/')
+          if (inFolder) {
+            const path = network.clustering.findNode(nodeOptions.id)
+            // check if the node is already in cluster
+            if (path.length === 1) {
+              console.log(`folder: ${folder}, node: ${nodeOptions.id}, join: true`)
+              return true
+            }
+          }
+          return false
+        },
+        clusterNodeProperties: createClusterProp(folder)
+      })
+    }
+
+    function getSingleSelection() {
+      const nodes = network.getSelectedNodes()
+      return nodes[0]
+    }
 
     function makeClusters() {
       let maxdepth = 0
       for (const n of nodes) {
         if (maxdepth < n.depth) maxdepth = n.depth
       }
-      makeClustersByDepth(0, maxdepth)
+      makeClustersByDepth(2, maxdepth)
     }
 
     function makeClustersByDepth(depth, maxdepth) {
@@ -208,12 +241,11 @@
       }
 
       const subnodes = {}
-      for (const n of nodes) {
+      for (const n of [...nodes, ...clusters]) {
         if (n.depth === depth) {
           subnodes[n.id] = n
         }
       }
-
 
       while (true) {
         const keys = Object.keys(subnodes)
@@ -221,17 +253,19 @@
 
         const refNode = subnodes[keys[0]]
         const folder = refNode.folder
+        const clusterNode = createClusterProp(folder, depth - 1)
         network.cluster({
           joinCondition: function (nodeOptions) {
             if (nodeOptions.depth === refNode.depth && nodeOptions.folder === refNode.folder) {
               delete subnodes[nodeOptions.id]
-              console.log(`folder: ${folder}, node: ${nodeOptions.id}, join: true`)
+              //console.log(`folder: ${folder}, node: ${nodeOptions.id}, join: true`)
               return true
             }
             return false
           },
-          clusterNodeProperties: createClusterProp(folder, depth - 1)
+          clusterNodeProperties: clusterNode
         })
+        clusters.push(clusterNode)
       }
     }
 
