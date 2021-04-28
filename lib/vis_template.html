@@ -2,41 +2,49 @@
 <html lang="en">
 
 <head>
-  <title>Vis Network | Other | Clustering by Zoom Level</title>
+  <title>source dependency (vis)</title>
 
   <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 
   <style type="text/css">
-    html,
-    body {
-      height: 100%
-    }
-
     #mynetwork {
       width: 100%;
-      height: 95%;
-      border: 1px solid lightgray;
+      height: 100%;
     }
 
-    p {
-      max-width: 600px;
+    .resizer {
+      border: 2px solid;
+      padding: 5px;
+      resize: both;
+      overflow: auto;
+      height: 800px;
     }
 
-    h4 {
-      margin-bottom: 3px;
+    .grid-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-gap: 20px;
     }
   </style>
 </head>
 
 <body>
-  <div id="tool"> 
-    <button id="collapse">collapse same level (shift+click)</button> &nbsp;
-    <button id="expand">expand (alt+click)</button> &nbsp;
-    <button id="expandAll">expand all children</button> &nbsp;
-    <button id="delete">delete</button> &nbsp;
-    <span id="progress"></span>
+  <div class="grid-container">
+    <div class="resizer">
+      <div id="mynetwork" class="grid-child mynetwork"></div>
+    </div>
+
+    <div class="grid-child">
+      <div id="tool" style="margin-bottom: 5px;"> 
+        <button id="collapse">collapse same level (shift+click)</button> &nbsp;
+        <button id="expand">expand (alt+click)</button> &nbsp;
+        <button id="expandAll">expand all children</button> &nbsp;
+        <button id="delete">delete</button> &nbsp;
+        <span id="progress"></span>
+      </div>
+      <div id="control"></div>
+    </div>
   </div>
-  <div id="mynetwork"></div>
 
   <script type="text/javascript">
     try {
@@ -86,55 +94,43 @@
       edges: edges,
     };
 
-    var options = {
-      
-        physics: {
-        barnesHut: {
-            gravitationalConstant: -3900,
-            centralGravity: 0,
-            springConstant: 0.01,
-            springLength: 100,
-            theta: 0.1
-        },
-        minVelocity: 1
-        },
-      autoResize: true,
-    };
-
     // clusters will be made dynamically
     const clusters = []
 
-    var network = new vis.Network(container, data, options);
-    network.setOptions({
+    var network = new vis.Network(container, data, {
+      layout: {
+        hierarchical: {
+          sortMethod: 'directed',
+          edgeMinimization: false,
+          levelSeparation: 100
+        }
+      },
       edges: {
         arrows: 'to',
-        shadow: true,
-        //smooth: true,
+        shadow: false,
+        smooth: {
+          type: 'continuous',
+          forceDirection: 'none'
+        },
         color: {
-          color: '#303030',
+          color: '#808080',
           highlight: '#1010FF'
         }
       },
       nodes: {
         shape: 'box',
-        shadow: true
+        color: {
+          border: '#808080',
+          background: '#E0E0E0'
+        }
+      },
+      configure: {
+        enabled: true,
+        showButton: true,
+        filter: 'layout,physics',
+        container: document.getElementById('control')
       }
-    })
-
-    function createClusterProp(folder, depth) {
-      return {
-              color: {
-                background: '#CCCCFF',
-                border: '#80FF80'
-              },
-              id: folder,
-              label: folder,
-              shape: 'box',
-              allowSingleNodeCluster: true,
-              depth: depth,
-              folder: folder.split('/').slice(0, -1).join('/')
-      }
-    }
+    });
 
     makeClusters()
 
@@ -266,6 +262,21 @@
           clusterNodeProperties: clusterNode
         })
         clusters.push(clusterNode)
+      }
+    }
+
+    function createClusterProp(folder, depth) {
+      return {
+              color: {
+                background: '#CCCCFF',
+                border: '#80FF80'
+              },
+              id: folder,
+              label: folder,
+              shape: 'box',
+              allowSingleNodeCluster: true,
+              depth: depth,
+              folder: folder.split('/').slice(0, -1).join('/')
       }
     }
 
