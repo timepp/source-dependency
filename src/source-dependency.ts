@@ -37,7 +37,7 @@ function main () {
       inner: { type: 'boolean', describe: 'show only inner dependencies' },
       v: { type: 'boolean', conflicts: ['f', 'o'], describe: 'create visjs html file in tmp folder and then open it with default program' },
       a: { type: 'boolean', describe: 'scan for all files. ' },
-      strict: {type: 'boolean', describe: 'strict match for dependencies' },
+      strict: { type: 'boolean', describe: 'strict match for dependencies' },
       depth: { type: 'string', describe: 'collapse depth on package level' },
       strip: { type: 'string', describe: 'common prefix to be stripped to simplify the result, useful on java projects' },
       f: { type: 'string', alias: 'format', describe: 'output format. one of: "plain", "dot", "dgml", "js", "vis"' },

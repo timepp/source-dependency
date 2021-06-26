@@ -1,4 +1,3 @@
-import { exception } from 'console'
 import * as fs from 'fs'
 import * as path from 'path'
 // import xmldoc from 'xmldoc'
@@ -106,7 +105,7 @@ const CLanguageService = {
   },
   stripExt: function (filename: string) {
     const ext = path.extname(filename)
-    return filename.slice(0, -ext.length)
+    return ext.length === 0 ? filename : filename.slice(0, -ext.length)
   }
 }
 
@@ -257,7 +256,7 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
   for (const p of Object.keys(data.pathDependencies)) {
     const m = data.path2module[p]
     if (m) {
-      const modules = data.pathDependencies[p].map( v => data.path2module[v] || v)
+      const modules = data.pathDependencies[p].map(v => data.path2module[v] || v)
       if (modules.length > 0) {
         if (m in data.moduleDependencies) {
           data.moduleDependencies[m].push(...modules)
