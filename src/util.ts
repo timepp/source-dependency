@@ -75,3 +75,8 @@ export function walkHierarchy (hierarchy: RecursiveObject, visitor: (parent: str
     }
   }
 }
+
+export function stripExt (filename: string) {
+  const ext = path.extname(filename)
+  return ext.length === 0 ? filename : filename.slice(0, -ext.length)
+}

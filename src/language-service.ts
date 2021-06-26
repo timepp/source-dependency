@@ -80,39 +80,70 @@ const javaLanguageService: LanguageService = {
   }
 }
 
+function parseCLikeLanguage (context: ParseContext) {
+  const dependencies = []
+  let module
+  let r = context.line.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
+  if (r) dependencies.push(r[1])
+  r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
+  if (r) dependencies.push(r[1])
+  if (context.lineNumber === 1) {
+    const base = util.stripExt(context.currentFile)
+    if (context.files.find(f => f !== context.currentFile && util.stripExt(f) === base)) {
+      module = base
+    } else {
+      module = context.currentFile
+    }
+  }
+  return {
+    module: module,
+    pathDependencies: dependencies
+  }
+}
+
 const CLanguageService = {
   name: 'C',
+  exts: ['.c', '.h'],
+  parse: parseCLikeLanguage
+}
+
+const CppLanguageService = {
+  name: 'C++',
   exts: ['.c', '.cpp', '.h', '.hpp', '.cxx', '.cc', '.hh', '.m'],
+  parse: parseCLikeLanguage
+}
+
+const PythonLanguageService: LanguageService = {
+  name: 'python',
+  exts: ['.py'],
   parse: function (context: ParseContext) {
-    const dependencies = []
-    let module
-    let r = context.line.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
-    if (r) dependencies.push(r[1])
-    r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
-    if (r) dependencies.push(r[1])
-    if (context.lineNumber === 1) {
-      const base = this.stripExt(context.currentFile)
-      if (context.files.find(f => f !== context.currentFile && this.stripExt(f) === base)) {
-        module = base
-      } else {
-        module = context.currentFile
+    const dependencies: string[] = []
+    let r = context.line.match(/^\s*import\s+(.*)$/)
+    if (r) {
+      for (const x of r[1].split(/\s*,\s*/g)) {
+        // `<module>` or `<module> as <alias>`
+        dependencies.push(x.split(/\s+/g)[0])
       }
     }
-    return {
-      module: module,
-      pathDependencies: dependencies
-    }
-  },
-  stripExt: function (filename: string) {
-    const ext = path.extname(filename)
-    return ext.length === 0 ? filename : filename.slice(0, -ext.length)
+
+    r = context.line.match(/\s*from\s+(.*)\s+import\s+.*$/)
+    if (r) dependencies.push(r[1])
+
+    r = context.line.match(/.*import_module\s*\(\s*('|")(.*)\1\s*\).*$/)
+    if (r) dependencies.push(r[2])
+
+    const deps = dependencies.map(v => v.replaceAll('.', '/') + '.py')
+
+    return { pathDependencies: deps }
   }
 }
 
 const languageServiceRegistry: LanguageService[] = [
   jsLanguageService,
   javaLanguageService,
-  CLanguageService
+  CLanguageService,
+  CppLanguageService,
+  PythonLanguageService
 ]
 
 /**
@@ -160,11 +191,8 @@ export function getLanguageService (name: string) {
   return languageServiceRegistry.find(s => s.name === name)
 }
 
-export function getLanguageSummary () {
-  const maxLanguageNameLength = Math.max(...languageServiceRegistry.map(v => v.name.length))
-  return languageServiceRegistry
-    .map(v => v.name.padEnd(maxLanguageNameLength) + '  ' + v.desc)
-    .join('\n')
+export function getSupportedLanguages () {
+  return languageServiceRegistry.map(v => v.name)
 }
 
 export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean) {

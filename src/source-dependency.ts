@@ -28,7 +28,7 @@ function main () {
     .strict()
     .usage('Usage: $0 <target> [options]')
     .wrap(args.terminalWidth())
-    .epilog('Supported languages: \n\n' + ls.getLanguageSummary())
+    .epilog('Supported languages: ' + ls.getSupportedLanguages().join(', '))
     .options({
       I: { array: true, type: 'string', alias: 'include', describe: 'path filters (regex) to include' },
       E: { array: true, type: 'string', alias: 'exclude', describe: 'path filters (regex) to exclude' },
