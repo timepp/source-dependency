@@ -13,7 +13,7 @@
             ],
             "program": "${workspaceFolder}/src/source-dependency.ts",
             "preLaunchTask": "tsc: build - tsconfig.json",
-            "args": [ "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community\\VC\\Tools\\MSVC\\14.29.30037\\include", "--language=C", "-a", "--exclude=nodes_modules" ],
+            "args": [ "../shadowsocks-windows", "--language=C#", "--exclude=nodes_modules" ],
             "outFiles": [
                 "${workspaceFolder}/**/*.js"
             ]

@@ -58,6 +58,28 @@ const jsLanguageService: LanguageService = {
   }
 }
 
+const CsharpLanguageService: LanguageService = {
+  name: 'C#',
+  exts: ['.cs'],
+  moduleSeparator: '.',
+  parse: function (context: ParseContext) {
+    const dependencies = []
+    let module
+    let r = context.line.match(/^\s*namespace\s+(.*)\s*$/)
+    if (r) {
+      module = r[1]
+    }
+    r = context.line.match(/^\s*using\s+([A-Za-z0-9.]+);$/)
+    if (r) {
+      dependencies.push(r[1])
+    }
+    return {
+      module: module,
+      moduleDependencies: dependencies
+    }
+  }
+}
+
 const javaLanguageService: LanguageService = {
   name: 'java',
   exts: ['.java'],
@@ -143,7 +165,8 @@ const languageServiceRegistry: LanguageService[] = [
   javaLanguageService,
   CLanguageService,
   CppLanguageService,
-  PythonLanguageService
+  PythonLanguageService,
+  CsharpLanguageService
 ]
 
 /**
