@@ -80,3 +80,29 @@ export function stripExt (filename: string) {
   const ext = path.extname(filename)
   return ext.length === 0 ? filename : filename.slice(0, -ext.length)
 }
+
+export type ProgressCallback = (current: number, total: number) => void
+export class ProgressMarker {
+  private current = 0
+  private total = 0
+  private threshold = 0
+  private significant = 0
+  private callback?: ProgressCallback
+
+  constructor (total: number, callback?: ProgressCallback, threshold?: number) {
+    this.total = total
+    this.callback = callback
+    if (!threshold) this.threshold = Math.floor(this.total / 100)
+  }
+
+  advance (delta: number) {
+    this.current += delta
+    const significant = Math.floor(this.current / this.threshold)
+    if (significant !== this.significant) {
+      this.significant = significant
+      if (this.callback) {
+        this.callback(this.current, this.total)
+      }
+    }
+  }
+}

@@ -33,7 +33,8 @@ interface LanguageService {
   exts: string[]
   desc?: string
   moduleSeparator?: string
-  parse(context: ParseContext): ParseResult
+  parseSingleLine?(context: ParseContext): ParseResult
+  parse?(context: ParseContext): ParseResult
   getResolveCandidates?(f: string) : string[]
 }
 
@@ -41,7 +42,7 @@ const jsLanguageService: LanguageService = {
   name: 'javascript',
   desc: 'javascript',
   exts: ['.js', '.cjs', '.mjs', '.vue'],
-  parse: function (context: ParseContext) {
+  parseSingleLine: function (context: ParseContext) {
     const dependencies: string[] = []
     let r = context.line.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
     if (r) dependencies.push(r[1])
@@ -58,11 +59,34 @@ const jsLanguageService: LanguageService = {
   }
 }
 
+const tsLanguageService: LanguageService = {
+  name: 'typescript',
+  desc: 'typescript',
+  exts: ['.ts', '.tsx'],
+  parse: function (context: ParseContext) {
+    const matcher = /^\s*import.*?\s+from\s+['"]([^'"]+)['"]\s*;?$/gms
+    const deps: string[] = []
+    while (true) {
+      const r = matcher.exec(context.fileContent)
+      if (r === null) break
+      deps.push(r[1])
+    }
+    return { pathDependencies: deps }
+  },
+  getResolveCandidates: function (f: string) {
+    const candidates = [
+      ...this.exts.map(v => f + v),
+      ...this.exts.map(v => f + '/index' + v)
+    ]
+    return candidates
+  }
+}
+
 const CsharpLanguageService: LanguageService = {
   name: 'C#',
   exts: ['.cs'],
   moduleSeparator: '.',
-  parse: function (context: ParseContext) {
+  parseSingleLine: function (context: ParseContext) {
     const dependencies = []
     let module
     let r = context.line.match(/^\s*namespace\s+(.*)\s*$/)
@@ -84,7 +108,7 @@ const javaLanguageService: LanguageService = {
   name: 'java',
   exts: ['.java'],
   moduleSeparator: '.',
-  parse: function (context: ParseContext) {
+  parseSingleLine: function (context: ParseContext) {
     const dependencies = []
     let module
     let r = context.line.match(/^package (.*);$/)
@@ -138,7 +162,7 @@ const CppLanguageService = {
 const PythonLanguageService: LanguageService = {
   name: 'python',
   exts: ['.py'],
-  parse: function (context: ParseContext) {
+  parseSingleLine: function (context: ParseContext) {
     const dependencies: string[] = []
     let r = context.line.match(/^\s*import\s+(.*)$/)
     if (r) {
@@ -162,6 +186,7 @@ const PythonLanguageService: LanguageService = {
 
 const languageServiceRegistry: LanguageService[] = [
   jsLanguageService,
+  tsLanguageService,
   javaLanguageService,
   CLanguageService,
   CppLanguageService,
@@ -218,7 +243,7 @@ export function getSupportedLanguages () {
   return languageServiceRegistry.map(v => v.name)
 }
 
-export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean) {
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, progressCallback?: util.ProgressCallback) {
   const ls = languageServiceRegistry.find(s => s.name === language)
   if (!ls) {
     throw Error(`unsupported language: ${language}`)
@@ -243,11 +268,14 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     line: ''
   }
 
+  const marker = new util.ProgressMarker(files.length, progressCallback)
   for (const f of files) {
+    marker.advance(1)
     context.currentFile = f
     const pathDependencies = []
     const moduleDependencies = []
     let module = ''
+
     const parent = path.dirname(f)
     const ext = path.extname(f)
     if (!scanAll && ls.exts.indexOf(ext) < 0) {
@@ -258,31 +286,35 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     const fullName = dir + '/' + f
     const content = fs.readFileSync(fullName, 'utf-8')
     context.fileContent = content
-    const lines = content.split(/\r?\n/)
-    for (let i = 0; i < lines.length; i++) {
-      context.line = lines[i]
-      context.lineNumber = i + 1
-      const info = ls.parse(context)
-      if (info.pathDependencies) {
-        for (const d of info.pathDependencies) {
-          const cd = cancelDot(d)
-          const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
-          const resolvedPath = resolvePath(files, parent, [cd, ...candidates], strictMatch) || '*external*/' + d
-          pathDependencies.push(resolvedPath)
-        }
-      }
-      if (info.moduleDependencies) {
-        moduleDependencies.push(...info.moduleDependencies)
-      }
-      // resolve dependencies
-      if (info.module) {
-        module = info.module
-        data.path2module[f] = info.module
-        data.module2path[info.module] = f
+
+    if (ls.parse) {
+      const pr = ls.parse(context)
+      if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
+      if (pr.moduleDependencies) moduleDependencies.push(...pr.moduleDependencies)
+      if (pr.module) module = pr.module
+    } else if (ls.parseSingleLine) {
+      const lines = content.split(/\r?\n/)
+      for (let i = 0; i < lines.length; i++) {
+        context.line = lines[i]
+        context.lineNumber = i + 1
+        const pr = ls.parseSingleLine(context)
+        if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
+        if (pr.moduleDependencies) moduleDependencies.push(...pr.moduleDependencies)
+        if (pr.module) module = pr.module
       }
     }
 
-    data.pathDependencies[f] = pathDependencies
+    // resolve dependencies
+    if (module) {
+      data.path2module[f] = module
+      data.module2path[module] = f
+    }
+
+    data.pathDependencies[f] = pathDependencies.map(d => {
+      const cd = cancelDot(d)
+      const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
+      return resolvePath(files, parent, [cd, ...candidates], strictMatch) || '*external*/' + d
+    })
     if (module) {
       data.moduleDependencies[module] = moduleDependencies
     }

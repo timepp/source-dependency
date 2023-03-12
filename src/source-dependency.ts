@@ -79,7 +79,7 @@ function main () {
   const targetIsFile = fs.lstatSync(target).isFile()
   const dir = targetIsFile ? path.dirname(target) : target
   const files = targetIsFile ? [target] : util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)
-  const dependencyInfo = ls.parse(dir, files, argv.l, argv.a || false, argv.strict || false)
+  const dependencyInfo = ls.parse(dir, files, argv.l, argv.a || false, argv.strict || false, (c, t) => console.log(`processing progress: ${c} / ${t}`))
 
   // use path dependencies currently
   data.dependencies = dependencyInfo.pathDependencies
