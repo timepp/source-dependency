@@ -68,7 +68,9 @@ const data: DependencyData = {
 const targetIsFile = Deno.statSync(c.target).isFile
 const dir = targetIsFile ? path.dirname(c.target) : c.target
 const files = targetIsFile ? [path.basename(c.target)] : [...util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)].map(v => v.path.replaceAll('\\', '/'))
-const dependencyInfo = ls.parse(path.resolve(dir), files, c.language, !c.excludeWellKnownAuxiliaryFolders, strictMatching, pathFilters, (c, t) => console.log(`processing progress: ${c} / ${t}`))
+const relaFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
+console.log(relaFiles)
+const dependencyInfo = ls.parse(path.resolve(dir), relaFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, strictMatching, pathFilters, (c, t) => console.log(`processing progress: ${c} / ${t}`))
 
 // use path dependencies currently
 data.dependencies = dependencyInfo.pathDependencies

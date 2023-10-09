@@ -159,7 +159,7 @@ const CLanguageService = {
 const CppLanguageService = {
   name: 'C++',
   exts: ['.c', '.cpp', '.h', '.hpp', '.cxx', '.cc', '.hh', '.m'],
-  parse: parseCLikeLanguage
+  parseSingleLine: parseCLikeLanguage
 }
 
 const PythonLanguageService: LanguageService = {
@@ -337,7 +337,7 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     pathFilters
   }
 
-  const marker = new util.ProgressMarker(files.length, progressCallback)
+  const marker = new util.ProgressMarker(files.length, progressCallback, 100)
   for (const f of files) {
     marker.advance(1)
     context.currentFile = f
