@@ -1,22 +1,14 @@
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Deno",
             "type": "node",
             "request": "launch",
-            "name": "Launch Program",
-            "skipFiles": [
-                "<node_internals>/**"
-            ],
-            "program": "${workspaceFolder}/src/source-dependency.ts",
-            "preLaunchTask": "tsc: build - tsconfig.json",
-            "args": [ "../shadowsocks-windows", "--language=C#", "--exclude=nodes_modules" ],
-            "outFiles": [
-                "${workspaceFolder}/**/*.js"
-            ]
+            "cwd": "${workspaceFolder}",
+            "runtimeExecutable": "deno",
+            "runtimeArgs": ["run", "--inspect-wait"],
+            "args": ["src\\source-dependency.ts", "--language=typescript"],
         }
     ]
 }

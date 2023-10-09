@@ -1,9 +1,14 @@
-import * as fs from 'fs'
-import * as path from 'path'
+import * as path from 'https://deno.land/std/path/mod.ts'
 // import xmldoc from 'xmldoc'
-import * as util from './util.js'
+import * as util from './util.ts'
+
+export type PathFilters = {
+  includeFilters: RegExp[],
+  excludeFilters: RegExp[]
+}
 
 type ParseContext = {
+  pathFilters: PathFilters,
   rootDir: string,
   files: string[],
   currentFile: string,
@@ -15,7 +20,7 @@ type ParseContext = {
 type ParseResult = {
   module?: string,
   pathDependencies?: string[]
-  moduleDependencies?: string[]
+  moduleDependencies?: { [id: string]: string[] }
 }
 
 export type DependencyInfo = {
@@ -23,8 +28,6 @@ export type DependencyInfo = {
   module2path: { [id: string]: string }
   pathDependencies: { [id: string]: string[] }
   moduleDependencies: { [id: string]: string[] }
-  pathHierarchy: util.RecursiveObject,
-  moduleHierarchy: util.RecursiveObject,
   moduleSeparator: string
 }
 
@@ -99,7 +102,7 @@ const CsharpLanguageService: LanguageService = {
     }
     return {
       module: module,
-      moduleDependencies: dependencies
+      moduleDependencies: { module: dependencies }
     }
   }
 }
@@ -121,7 +124,7 @@ const javaLanguageService: LanguageService = {
     }
     return {
       module: module,
-      moduleDependencies: dependencies
+      moduleDependencies: { module: dependencies }
     }
   }
 }
@@ -184,6 +187,72 @@ const PythonLanguageService: LanguageService = {
   }
 }
 
+const NpmPackageService: LanguageService = {
+  name: 'npm',
+  exts: ['.json'], // we look only into `package.json`
+  parse: function (context: ParseContext) {
+    type PackageDependencies = { [key: string]: string[] }
+    if (context.currentFile !== 'package.json') return {}
+    const getDirectDependency = (dir: string) => {
+      if (!util.applyFiltersToStr(dir, context.pathFilters.includeFilters, context.pathFilters.excludeFilters)) return []
+      try {
+        const pkg = JSON.parse(Deno.readTextFileSync(path.join(dir, 'package.json')))
+        const deps = pkg.dependencies as PackageDependencies || {}
+        return Object.keys(deps)
+      } catch (e) {
+        return []
+      }
+    }
+    const getAllPossibleDependencyDirs = (dir: string, dep: string) => {
+      const result: string[] = []
+      const parts = dir.split(path.SEP_PATTERN)
+      while (parts.length > 0) {
+        result.push(path.join(...parts, 'node_modules', dep))
+        parts.pop()
+      }
+      return result
+    }
+    const getFirstUnprocessedDependency = (deps: PackageDependencies) => {
+      for (const pkg in deps) {
+        for (const dep of deps[pkg]) {
+          if (!deps[dep]) {
+            return dep
+          }
+        }
+      }
+      return null
+    }
+
+    const deps: PackageDependencies = {}
+    const dir = path.dirname(path.join(context.rootDir, context.currentFile))
+    const myName = dir.split(path.SEP_PATTERN).pop() as string
+    deps[myName] = getDirectDependency(dir)
+
+    while (true) {
+      const dep = getFirstUnprocessedDependency(deps)
+      if (!dep) {
+        break
+      }
+      deps[dep] = []
+      const dirs = getAllPossibleDependencyDirs(dir, dep)
+      for (const d of dirs) {
+        const dd = getDirectDependency(d)
+        if (dd.length > 0) {
+          deps[dep] = dd
+          break
+        }
+      }
+    }
+
+    const translate = (s:string) => s.replaceAll(/-/g, '/')
+    const moduleDependencies: {[id:string]:string[]} = {}
+    for (const pkg in deps) {
+      moduleDependencies[translate(pkg)] = deps[pkg].map(translate)
+    }
+    return { moduleDependencies }
+  }
+}
+
 const languageServiceRegistry: LanguageService[] = [
   jsLanguageService,
   tsLanguageService,
@@ -191,7 +260,8 @@ const languageServiceRegistry: LanguageService[] = [
   CLanguageService,
   CppLanguageService,
   PythonLanguageService,
-  CsharpLanguageService
+  CsharpLanguageService,
+  NpmPackageService
 ]
 
 /**
@@ -243,7 +313,7 @@ export function getSupportedLanguages () {
   return languageServiceRegistry.map(v => v.name)
 }
 
-export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, progressCallback?: util.ProgressCallback) {
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, progressCallback?: util.ProgressCallback) {
   const ls = languageServiceRegistry.find(s => s.name === language)
   if (!ls) {
     throw Error(`unsupported language: ${language}`)
@@ -254,8 +324,6 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     module2path: {},
     pathDependencies: {},
     moduleDependencies: {},
-    pathHierarchy: {},
-    moduleHierarchy: {},
     moduleSeparator: ls.moduleSeparator || '/'
   }
 
@@ -265,7 +333,8 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     currentFile: '',
     fileContent: '',
     lineNumber: 0,
-    line: ''
+    line: '',
+    pathFilters
   }
 
   const marker = new util.ProgressMarker(files.length, progressCallback)
@@ -273,7 +342,6 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     marker.advance(1)
     context.currentFile = f
     const pathDependencies = []
-    const moduleDependencies = []
     let module = ''
 
     const parent = path.dirname(f)
@@ -284,13 +352,13 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     }
 
     const fullName = dir + '/' + f
-    const content = fs.readFileSync(fullName, 'utf-8')
+    const content = Deno.readTextFileSync(fullName)
     context.fileContent = content
 
     if (ls.parse) {
       const pr = ls.parse(context)
       if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
-      if (pr.moduleDependencies) moduleDependencies.push(...pr.moduleDependencies)
+      if (pr.moduleDependencies) data.moduleDependencies = { ...data.moduleDependencies, ...pr.moduleDependencies }
       if (pr.module) module = pr.module
     } else if (ls.parseSingleLine) {
       const lines = content.split(/\r?\n/)
@@ -299,7 +367,7 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
         context.lineNumber = i + 1
         const pr = ls.parseSingleLine(context)
         if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
-        if (pr.moduleDependencies) moduleDependencies.push(...pr.moduleDependencies)
+        if (pr.moduleDependencies) data.moduleDependencies = { ...data.moduleDependencies, ...pr.moduleDependencies }
         if (pr.module) module = pr.module
       }
     }
@@ -315,9 +383,6 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
       const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
       return resolvePath(files, parent, [cd, ...candidates], strictMatch) || '*external*/' + d
     })
-    if (module) {
-      data.moduleDependencies[module] = moduleDependencies
-    }
   }
 
   // path dependencies can be built from module dependencies (if any)
@@ -348,18 +413,6 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
         }
       }
     }
-  }
-
-  for (const f of Object.keys(data.pathDependencies)) {
-    data.pathDependencies[f] = [...new Set(data.pathDependencies[f])]
-    util.buildHierarchy([f, ...data.pathDependencies[f]], '/', data.pathHierarchy)
-  }
-
-  for (const m of Object.keys(data.moduleDependencies)) {
-    const depset = new Set(data.moduleDependencies[m])
-    depset.delete(m)
-    data.moduleDependencies[m] = [...depset]
-    util.buildHierarchy([m, ...data.moduleDependencies[m]], ls.moduleSeparator || '/', data.moduleHierarchy)
   }
 
   return data

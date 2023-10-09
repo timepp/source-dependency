@@ -8,11 +8,11 @@ Of course the easy usage is achieved by sacrificing the accuracy. This tool only
 
 The best dependency viewer is MS dgml viewer. It's only available on Windows. On Linux/Mac use dot or integrated visjs.
 
-## install
+## usage
 
-`npm install -g source-dependency`
+source-dependency need deno installed.
 
-## usage example
+### run locally
 
 ```bash
 # output dependency and then use graphviz to visualize the dependency
@@ -25,6 +25,8 @@ source-dependency -l java . --check
 source-dependency -l java . --strip com.my_company -E third_party -f dgml -o result.dgml
 
 ```
+
+### run directly
 
 ### usage demo
 
