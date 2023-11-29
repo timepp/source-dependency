@@ -1,62 +1,100 @@
-import * as path from 'https://deno.land/std/path/mod.ts'
-import * as flags from 'https://deno.land/std/flags/mod.ts'
+import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
+import * as fs from "https://deno.land/std@0.180.0/fs/mod.ts"
+import * as flags from "https://deno.land/std@0.198.0/flags/mod.ts"
+import * as json5 from "https://deno.land/x/json5@v1.0.0/mod.ts"
+import * as color from "https://deno.land/std@0.208.0/fmt/colors.ts";
 import * as ls from './language-service.ts'
 import * as util from './util.ts'
+import { DependencyData, generateOutput, getAllGenerators } from './generator.ts'
 
-type RecursiveObject = {
-  [key: string]: any
-}
-
-type DependencyData = {
-  dependencies: { [id: string]: string[] },
-  flatDependencies: [string, string][],
-  contains: RecursiveObject,
-  flatContains: [string, string][]
-}
-
-type Config = {
-  excludeWellKnownAuxiliaryFolders: boolean,
-  processingFilters: string[],
-  excludeExternal: boolean,
-  resultFilters: string[],
-  prefix: string,
-  language: string,
-  target: string, // file or directory
-  outputFormat: 'plain' | 'dot' | 'dgml' | 'js' | 'vis',
-  outputFile?: string,
-  forceShowingPathDependency?: boolean,
-  depth?: string,
-  check: boolean
-}
-
-const defaultConfig: Config = {
+const defaultConfig = {
   excludeWellKnownAuxiliaryFolders: true,
-  processingFilters: [],
+  inputFilters: new Array<string>(),
   excludeExternal: false,
-  resultFilters: [],
+  resultFilters: new Array<string>(),
+  inputPathMapping: new Array<string>(),
   prefix: '',
-  language: 'javascript',
+  language: 'typescript',
   target: '.',
   outputFormat: 'plain',
-  check: false
+  outputFile: '',
+  configFile: '',
+  forceShowingPathDependency: false,
+  depth: '',
+  check: false,
+  debug: false
 }
 
-const args = flags.parse(Deno.args)
+const configDescription: {[P in keyof typeof defaultConfig]: [/*doc*/string, /*alias*/string]} = {
+  excludeWellKnownAuxiliaryFolders: ['exclude `.git` and `node_modules`', ''],
+  inputFilters: ['input filters, prefix `-` for exclude filters', 'if'],
+  inputPathMapping: ['input path mapping, e.g. `a=b` means replace `a` with `b` in input paths', 'ipm'],
+  excludeExternal: ['exclude external dependencies', ''],
+  resultFilters: ['result filters', 'rf'],
+  prefix: ['prefix', 'p'],
+  language: [`languages, all supported languages are: ${ls.getSupportedLanguages().join(',')}`, 'l'],
+  target: ['target, can be a file or a folder', ''],
+  outputFormat: ['output format, see below section for description', 'f'],
+  outputFile: ['output file', 'o'],
+  forceShowingPathDependency: ['force showing path dependency', ''],
+  depth: ['depth', ''],
+  check: ['check', ''],
+  configFile: ['config file', 'c'],
+  debug: ['output debug information', 'd']
+}
+
+function showHelp() {
+  console.log('Usage: sd [options] [target]')
+  console.log('Options:')
+  for (const k in configDescription) {
+    const kk = k as keyof typeof configDescription
+    const v = configDescription[kk] as [string, string]
+    const flag = v[1] ? ` (${v[1]})` : ''
+    console.log(`%c${kk}%c${flag}:`, 'font-weight: bold; color: blue', 'color: blue', v[0])
+  }
+  console.log('Output formats:')
+  for (const g of getAllGenerators()) {
+    console.log(`  %c${g.name.padStart(8)}`, 'font-weight: bold; color: green', g.description)
+  }
+}
+
+const args = flags.parse(Deno.args, {
+  collect: Object.keys(defaultConfig).filter(v => Array.isArray(defaultConfig[v as keyof typeof defaultConfig])),
+  alias: Object.fromEntries(Object.entries(configDescription).map(v => [v[1][1], v[0]])) as {[k: string]: string},
+}) as unknown as typeof defaultConfig & {_: string[], h?: boolean, help?: boolean}
+
 if (args._.length > 0) {
   args.target = args._[0].toString()
 }
 
-const fileConfig: Config = args.c? JSON.parse(Deno.readTextFileSync(args.c)): { }
-const c: Config = { ...defaultConfig, ...fileConfig, ...args }
-console.log('config: ', c)
+if (args.debug) {
+  console.log('args: ', args)
+}
+if (args.h || args.help) {
+  showHelp()
+  Deno.exit(0)
+}
 
-const pathFilters = parseFilters(c.processingFilters)
+const fileConfig = args.configFile? json5.parse(Deno.readTextFileSync(args.configFile)): { }
+const c: typeof defaultConfig = { ...defaultConfig, ...fileConfig, ...args }
+
+// deno-lint-ignore no-explicit-any
+function debugOutput (...data: any[]) {
+  if (c.debug) console.log(...data)
+}
+
+function writeControlMsg(msg: string) {
+  Deno.stderr.writeSync(new TextEncoder().encode(color.brightBlue(msg + '\n')))
+}
+
+debugOutput('config: ', c)
+
+const pathFilters = parseFilters(c.inputFilters)
 if (c.excludeWellKnownAuxiliaryFolders) {
-  pathFilters.excludeFilters.push(/\.git/, /^\bnode_modules\b/)
+  pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
 }
 const resultTextFilters = parseFilters(c.resultFilters)
 const strictMatching = false
-const outputFormat = c.outputFormat
 
 const data: DependencyData = {
   dependencies: {},
@@ -67,10 +105,39 @@ const data: DependencyData = {
 
 const targetIsFile = Deno.statSync(c.target).isFile
 const dir = targetIsFile ? path.dirname(c.target) : c.target
-const files = targetIsFile ? [path.basename(c.target)] : [...util.listFilesRecursive(dir, pathFilters.includeFilters, pathFilters.excludeFilters)].map(v => v.path.replaceAll('\\', '/'))
-const relaFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
-console.log(relaFiles)
-const dependencyInfo = ls.parse(path.resolve(dir), relaFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, strictMatching, pathFilters, (c, t) => console.log(`processing progress: ${c} / ${t}`))
+const exts = ls.getLanguageExtensions(c.language)
+
+if (targetIsFile) {
+  debugOutput('searching directory: ', dir)
+  debugOutput('target is file: ', c.target)
+} else {
+  debugOutput('searching directory: ', dir)
+  debugOutput('path filters: ', pathFilters)
+  debugOutput('file exts: ', exts)
+}
+
+const files = targetIsFile ? [c.target] 
+  : [...fs.walkSync(dir, { 
+      includeDirs: false, 
+      skip: pathFilters.excludeFilters, 
+      match: pathFilters.includeFilters.length > 0 ? pathFilters.includeFilters : undefined,
+      exts
+     })].map(v => v.path.replaceAll('\\', '/'))
+const relativeFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
+writeControlMsg(`processing ${files.length} files...`)
+
+const pathResolver = (s: string) => {
+  for (const m of c.inputPathMapping) {
+    const [a, b] = m.split('=')
+    if (s.startsWith(a)) {
+      return b + s.slice(a.length)
+    }
+  }
+  return s
+}
+
+const dependencyInfo = ls.parse(path.resolve(dir), relativeFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, 
+  strictMatching, pathFilters, pathResolver, (c, t) => writeControlMsg(`processing progress: ${c} / ${t}`))
 
 // use path dependencies currently
 data.dependencies = dependencyInfo.pathDependencies
@@ -131,17 +198,19 @@ while (!completed) {
 data.flatContains = data.flatContains.filter(v => v[0] !== '')
 
 if (c.check) {
-  findCycleDependencies(data)
-} else {
-  let result = ''
-  switch (outputFormat) {
-    case 'dgml': result = generateDGML(data); break
-    case 'js': result = generateJS(data); break
-    case 'dot': result = generateDot(data); break
-    case 'vis': result = generateVisJs(data); break
-    default: result = generateDependencies(data); break
+  const cycles = util.findCycleDependencies(data.flatDependencies)
+  if (cycles.length > 0) {
+    console.log('cycles found:')
+    for (const cycle of cycles) {
+      console.log(cycle.join(' -> '))
+    }
+    Deno.exit(1)
+  } else {
+    console.log('no cycles found')
+    Deno.exit(0)
   }
-
+} else {
+  const result = generateOutput(c.outputFormat, data)
   if (c.outputFile) {
     Deno.writeTextFileSync(c.outputFile, result)
   } else {
@@ -156,121 +225,10 @@ function trimPrefix (s:string, prefix:string|undefined) {
   return s
 }
 
-function generateDependencies (data: DependencyData) {
-  return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
-}
-
 function stripByDepth (s: string, depth: number, separator: string) {
   if (depth === 0) return s
   const arr = s.split(separator)
   return arr.slice(0, depth).join(separator)
-}
-
-function generateDGML (data: DependencyData) {
-  // node
-  const nodes : { [id: string]: number } = {}
-  const parentNodes : { [id: string]: number } = {}
-
-  const header = '<?xml version="1.0" encoding="utf-8"?>\n<DirectedGraph xmlns="http://schemas.microsoft.com/vs/2009/dgml">\n'
-  const tail = '</DirectedGraph>'
-
-  let linkStr = '<Links>\n'
-  for (const l of data.flatContains) {
-    linkStr += `  <Link Source="${l[0]}" Target="${l[1]}" Category="Contains" />\n`
-    parentNodes[l[0]] = 1
-  }
-  for (const l of data.flatDependencies) {
-    linkStr += `  <Link Source="${l[0]}" Target="${l[1]}" />\n`
-    nodes[l[0]] = 1
-    nodes[l[1]] = 1
-  }
-  linkStr += '</Links>\n'
-
-  let nodeStr = '<Nodes>\n'
-  for (const n in parentNodes) {
-    nodeStr += `  <Node Id="${n}" Label="${n}" Group="Collapsed"/>\n`
-  }
-  for (const n in nodes) {
-    nodeStr += `  <Node Id="${n}" Label="${n}"/>\n`
-  }
-  nodeStr += '</Nodes>\n'
-
-  const dgml = header + nodeStr + linkStr + tail
-  return dgml
-}
-
-function generateJS (data: DependencyData) {
-  return 'const data = ' + JSON.stringify(data, null, 4) + ';'
-}
-
-function generateDot (data: DependencyData) {
-  const theme = ['#ffd0cc', '#d0ffcc', '#d0ccff']
-  const getSubgraphStatements = function (obj: RecursiveObject, depth = 0) {
-    if (obj === null) return []
-    const arr: string[] = []
-    for (const p in obj) {
-      if (obj[p] === null) {
-        arr.push('"' + p + '"')
-      } else {
-        const color = theme[depth % theme.length]
-        arr.push('subgraph cluster_' + p.replace(/[^a-zA-Z0-9]/g, '_') + ' {')
-        arr.push(`style="rounded"; bgcolor="${color}"`)
-        arr.push(...getSubgraphStatements(obj[p], depth + 1))
-        arr.push('}')
-      }
-    }
-    return arr
-  }
-  const dependencyStatements = data.flatDependencies.map(v => `"${v[0]}" -> "${v[1]}"`)
-  const subgraphStatements = getSubgraphStatements(data.contains)
-
-  const dot = [
-    'digraph {',
-    '  overlap=false',
-    subgraphStatements,
-    dependencyStatements,
-    '}'
-  ].flat().join('\n')
-  return dot
-}
-
-function generateVisJs (data: DependencyData) {
-  const nodeNames = [...new Set(data.flatDependencies.flat())]
-  const nodes = nodeNames.map(v => { return { id: v, label: v, shape: 'box' } })
-  const edges = data.flatDependencies.map(v => { return { from: v[0], to: v[1], arrows: 'to' } })
-  const template = Deno.readTextFileSync('./vis_template.html')
-  const html = template.replace('__NODES', JSON.stringify(nodes)).replace('__EDGES', JSON.stringify(edges))
-  return html
-}
-
-function findCycleDependencies (data: DependencyData) {
-  let deps = data.flatDependencies
-  // 首先依次删除所有不依赖其他类的类, 直到删不动为止
-  while (true) {
-    const d = deps.filter(v => deps.findIndex(u => u[0] === v[1]) >= 0)
-    if (d.length === deps.length) {
-      break
-    }
-    deps = d
-  }
-
-  if (deps.length === 0) {
-    console.log('No circular dependency.')
-    return
-  }
-
-  // 此时从一个类开始沿着依赖前进, 必有环
-  const indexes = [0]
-  while (true) {
-    const lastIndex = indexes[indexes.length - 1]
-    const i = deps.findIndex(v => v[0] === deps[lastIndex][1])
-    indexes.push(i)
-    const ii = indexes.findIndex(v => v === i)
-    if (ii !== indexes.length - 1) {
-      console.log('Circular Dependency:\n' + indexes.slice(ii).map(x => deps[x][0]).join(' -> '))
-      break
-    }
-  }
 }
 
 function parseFilters (filters: string[]) : ls.PathFilters {

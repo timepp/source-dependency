@@ -1,4 +1,4 @@
-import * as path from 'https://deno.land/std/path/mod.ts'
+import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
 // import xmldoc from 'xmldoc'
 import * as util from './util.ts'
 
@@ -67,12 +67,12 @@ const tsLanguageService: LanguageService = {
   desc: 'typescript',
   exts: ['.ts', '.tsx'],
   parse: function (context: ParseContext) {
-    const matcher = /^\s*import.*?\s+from\s+['"]([^'"]+)['"]\s*;?$/gms
+    const matcher = /^\s*(import|export).*?\s+from\s+['"]([^'"]+)['"]\s*;?$/gms
     const deps: string[] = []
     while (true) {
       const r = matcher.exec(context.fileContent)
       if (r === null) break
-      deps.push(r[1])
+      deps.push(r[2])
     }
     return { pathDependencies: deps }
   },
@@ -199,7 +199,7 @@ const NpmPackageService: LanguageService = {
         const pkg = JSON.parse(Deno.readTextFileSync(path.join(dir, 'package.json')))
         const deps = pkg.dependencies as PackageDependencies || {}
         return Object.keys(deps)
-      } catch (e) {
+      } catch (_e) {
         return []
       }
     }
@@ -285,12 +285,12 @@ function cancelDot (s: string) {
 function resolvePath (files: string[], parent: string, candidates: string[], strictMatch: boolean) {
   for (const c of candidates) {
     const cc = cancelDot(c)
-    const pc = joinPath(parent, cc)
+    const pc = cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc)
     const result = files.find(f => {
       if (strictMatch) {
         return f === pc
       } else {
-        return f === cc || f.endsWith('/' + cc)
+        return f === pc || f === cc || f.endsWith('/' + cc)
       }
     })
     if (result) {
@@ -313,7 +313,13 @@ export function getSupportedLanguages () {
   return languageServiceRegistry.map(v => v.name)
 }
 
-export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, progressCallback?: util.ProgressCallback) {
+export function getLanguageExtensions(language: string) {
+  return getLanguageService(language)?.exts
+}
+
+export type NameResolver = (name: string) => string|null
+
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, resolver: NameResolver, progressCallback?: util.ProgressCallback) {
   const ls = languageServiceRegistry.find(s => s.name === language)
   if (!ls) {
     throw Error(`unsupported language: ${language}`)
@@ -337,7 +343,7 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     pathFilters
   }
 
-  const marker = new util.ProgressMarker(files.length, progressCallback, 100)
+  const marker = new util.ProgressMarker(files.length, progressCallback)
   for (const f of files) {
     marker.advance(1)
     context.currentFile = f
@@ -378,10 +384,20 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
       data.module2path[module] = f
     }
 
-    data.pathDependencies[f] = pathDependencies.map(d => {
+    const resolvePathDependency = (d: string) => {
       const cd = cancelDot(d)
       const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
-      return resolvePath(files, parent, [cd, ...candidates], strictMatch) || '*external*/' + d
+      return resolvePath(files, parent, [cd, ...candidates], strictMatch)
+    }
+    data.pathDependencies[f] = pathDependencies.map(d => {
+      const d1 = resolvePathDependency(d)
+      if (d1 !== null) return d1
+      const dr = resolver(d)
+      if (dr !== null) {
+        const d2 = resolvePathDependency(dr)
+        if (d2 !== null) return d2
+      }
+      return '*external*/' + d
     })
   }
 

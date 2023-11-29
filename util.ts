@@ -1,12 +1,11 @@
-import * as fs from 'https://deno.land/std/fs/mod.ts'
-import * as path from 'https://deno.land/std/path/mod.ts'
+import * as fs from "https://deno.land/std@0.180.0/fs/mod.ts"
+import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
 
 export function regulateSlash (s: string) {
   return s.replace(/\\/g, '/')
 }
 
 export function listFilesRecursive (dir: string, includeFilters: RegExp[], excludeFilters: RegExp[]) {
-  console.log('listFilesRecursive', dir, includeFilters, excludeFilters)
   return fs.walkSync(dir, { includeDirs: false, skip: excludeFilters, match: includeFilters.length > 0 ? includeFilters : undefined })
 }
 
@@ -65,6 +64,39 @@ export function stripExt (filename: string) {
   return ext.length === 0 ? filename : filename.slice(0, -ext.length)
 }
 
+export function findCycleDependencies (data: string[][]) {
+  let deps = data
+  const cycles: string[][] = []
+
+  while (true) {
+    while (true) {
+      const d = deps.filter(v => deps.findIndex(u => u[0] === v[1]) >= 0)
+      if (d.length === deps.length) {
+        break
+      }
+      deps = d
+    }
+  
+    if (deps.length === 0) {
+      break
+    }
+  
+    const indexes = [0]
+    while (true) {
+      const lastIndex = indexes[indexes.length - 1]
+      const i = deps.findIndex(v => v[0] === deps[lastIndex][1])
+      indexes.push(i)
+      const ii = indexes.findIndex(v => v === i)
+      if (ii !== indexes.length - 1) {
+        cycles.push(indexes.slice(ii).map(x => deps[x][0]))
+        deps = deps.filter((_v, i) => indexes.findIndex(x => x === i) < 0)
+        break
+      }
+    }
+  }
+  return cycles
+}
+
 export type ProgressCallback = (current: number, total: number) => void
 export class ProgressMarker {
   private current = 0
@@ -82,7 +114,7 @@ export class ProgressMarker {
   advance (delta: number) {
     this.current += delta
     const significant = Math.floor(this.current / this.threshold)
-    if (significant !== this.significant) {
+    if (significant !== this.significant || this.current === this.total) {
       this.significant = significant
       if (this.callback) {
         this.callback(this.current, this.total)

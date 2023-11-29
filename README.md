@@ -6,7 +6,7 @@ The advantage of this tool is that it has minimal dependencies, which means that
 
 Of course the easy usage is achieved by sacrificing the accuracy. This tool only do lexical parsing, so won't be 100% accurate for complex constructs. However the accuracy is very good in practice, please see the gallery below for more usage examples.
 
-The best dependency viewer is MS dgml viewer. It's only available on Windows. On Linux/Mac use dot or integrated visjs.
+The best dependency viewer is MS dgml viewer. It's only available on Windows. On Linux/Mac use dot or integrated `visjs`.
 
 ## usage
 
@@ -16,17 +16,19 @@ source-dependency need deno installed.
 
 ```bash
 # output dependency and then use graphviz to visualize the dependency
-source-dependency -l javascript ./node_modules/es-abstract/2015 -f dot | dot -Tsvg >~/v.svg
+deno run -A sd.ts -l javascript ./node_modules/es-abstract/2015 -f dot | dot -Tsvg >~/v.svg
 
 # check cycle dependencies
-source-dependency -l java . --check
+deno run -A sd.ts -l java . --check
 
-# generate dgml for better dependency walking in Visual Studio
-source-dependency -l java . --strip com.my_company -E third_party -f dgml -o result.dgml
+# generate dgml for better dependency walking in Visual Studio, more config is in config.jsonc
+deno run -A sd.ts -l java . -c config.jsonc -f dgml -o result.dgml
 
 ```
 
 ### run directly
+
+deno run -A https://deno.land/x/sourcedep/sd.ts --if=-test -f dgml d:\src\myproject
 
 ### usage demo
 
@@ -52,9 +54,6 @@ source-dependency -l java . --strip com.my_company -E third_party -f dgml -o res
 
 ## road map
 
-| feature        | description                                                  | timeline |
-|----------------|--------------------------------------------------------------|----------|
-| top10          | support top 10 language in TOIBE index                       | 2021 Q2  |
-| top50          | support top 50 language in TOIBE index                       | 2021 Q3  |
+- support top 50 language in TOIBE index
 
 welcome to send pull request to add support for any other language.
