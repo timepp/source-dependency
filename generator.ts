@@ -1,18 +1,13 @@
 import * as util from './util.ts'
-
-export type DependencyData = {
-    dependencies: { [id: string]: string[] },
-    flatDependencies: [string, string][],
-    contains: util.RecursiveObject,
-    flatContains: [string, string][]
-}
+import { DependencyData } from './language-service-interface.ts'
 
 const generatorRegistry: { [id: string]: [(data: DependencyData) => string, string] } = {
     dgml: [generateDGML, 'Directed Graph Markup Language, well supported by Visual Studio'],
     js: [generateJS, 'JavaScript'],
     dot: [generateDot, 'Graphviz DOT, commonly used in real world'],
     vis: [generateVisJs, 'A html visualization powered by vis.js'],
-    plain: [generatePlain, 'Plain Text']
+    plain: [generatePlain, 'Plain Text'],
+    raw: [generateRaw, 'Raw JSON']
 }
 
 export function generateOutput(type: string, data: DependencyData) {
@@ -31,7 +26,11 @@ export function getAllGenerators() {
 
 function generatePlain (data: DependencyData) {
     return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
-  }
+}
+
+function generateRaw (data: DependencyData) {
+    return JSON.stringify(data.rawInfo, null, 4)
+}
 
 function generateDGML (data: DependencyData) {
     // node

@@ -4,8 +4,9 @@ import * as flags from "https://deno.land/std@0.198.0/flags/mod.ts"
 import * as json5 from "https://deno.land/x/json5@v1.0.0/mod.ts"
 import * as color from "https://deno.land/std@0.208.0/fmt/colors.ts";
 import * as ls from './language-service.ts'
+import { PathFilters, DependencyData } from "./language-service-interface.ts";
 import * as util from './util.ts'
-import { DependencyData, generateOutput, getAllGenerators } from './generator.ts'
+import { generateOutput, getAllGenerators } from './generator.ts'
 
 const defaultConfig = {
   excludeWellKnownAuxiliaryFolders: true,
@@ -15,6 +16,7 @@ const defaultConfig = {
   inputPathMapping: new Array<string>(),
   prefix: '',
   language: 'typescript',
+  languageOption: '{}',
   target: '.',
   outputFormat: 'plain',
   outputFile: '',
@@ -33,6 +35,7 @@ const configDescription: {[P in keyof typeof defaultConfig]: [/*doc*/string, /*a
   resultFilters: ['result filters', 'rf'],
   prefix: ['prefix', 'p'],
   language: [`languages, all supported languages are: ${ls.getSupportedLanguages().join(',')}`, 'l'],
+  languageOption: ['language options, see below section for description', 'lo'],
   target: ['target, can be a file or a folder', ''],
   outputFormat: ['output format, see below section for description', 'f'],
   outputFile: ['output file', 'o'],
@@ -45,16 +48,21 @@ const configDescription: {[P in keyof typeof defaultConfig]: [/*doc*/string, /*a
 
 function showHelp() {
   console.log('Usage: sd [options] [target]')
+  console.log()
   console.log('Options:')
   for (const k in configDescription) {
     const kk = k as keyof typeof configDescription
     const v = configDescription[kk] as [string, string]
     const flag = v[1] ? ` (${v[1]})` : ''
-    console.log(`%c${kk}%c${flag}:`, 'font-weight: bold; color: blue', 'color: blue', v[0])
+    const defaultValue = JSON.stringify(defaultConfig[kk])
+    console.log(`  - %c${kk}%c${flag} %c= ${defaultValue}:`, 'font-weight: bold; color: blue', 'color: blue', 'color: grey', v[0])
   }
+  console.log()
   console.log('Output formats:')
+  const generators = getAllGenerators()
+  const maxNameLength = Math.max(...generators.map(v => v.name.length))
   for (const g of getAllGenerators()) {
-    console.log(`  %c${g.name.padStart(8)}`, 'font-weight: bold; color: green', g.description)
+    console.log(`  - %c${g.name.padEnd(maxNameLength)}`, 'font-weight: bold; color: green', g.description)
   }
 }
 
@@ -94,14 +102,8 @@ if (c.excludeWellKnownAuxiliaryFolders) {
   pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
 }
 const resultTextFilters = parseFilters(c.resultFilters)
+const languageOption = (typeof c.languageOption === 'string')? json5.parse(c.languageOption): c.languageOption
 const strictMatching = false
-
-const data: DependencyData = {
-  dependencies: {},
-  flatDependencies: [],
-  contains: {},
-  flatContains: []
-}
 
 const targetIsFile = Deno.statSync(c.target).isFile
 const dir = targetIsFile ? path.dirname(c.target) : c.target
@@ -116,6 +118,7 @@ if (targetIsFile) {
   debugOutput('file exts: ', exts)
 }
 
+writeControlMsg(`searching source files...`)
 const files = targetIsFile ? [c.target] 
   : [...fs.walkSync(dir, { 
       includeDirs: false, 
@@ -125,6 +128,7 @@ const files = targetIsFile ? [c.target]
      })].map(v => v.path.replaceAll('\\', '/'))
 const relativeFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
 writeControlMsg(`processing ${files.length} files...`)
+debugOutput('files: ', relativeFiles)
 
 const pathResolver = (s: string) => {
   for (const m of c.inputPathMapping) {
@@ -136,14 +140,27 @@ const pathResolver = (s: string) => {
   return s
 }
 
+const callContext = {
+  nameResolver: pathResolver,
+  progressCallback: (c: number, t: number) => writeControlMsg(`processing progress: ${c} / ${t}`),
+  debugOutput,
+  languageOption
+}
+
 const dependencyInfo = ls.parse(path.resolve(dir), relativeFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, 
-  strictMatching, pathFilters, pathResolver, (c, t) => writeControlMsg(`processing progress: ${c} / ${t}`))
+  strictMatching, pathFilters, callContext)
 
-// use path dependencies currently
-data.dependencies = dependencyInfo.pathDependencies
-
+let dependencies = dependencyInfo.pathDependencies
 if (Object.keys(dependencyInfo.moduleDependencies).length > 0 && !c.forceShowingPathDependency) {
-  data.dependencies = dependencyInfo.moduleDependencies
+  dependencies = dependencyInfo.moduleDependencies
+}
+
+const data: DependencyData = {
+  rawInfo: dependencyInfo,
+  dependencies,
+  flatDependencies: [],
+  contains: {},
+  flatContains: []
 }
 
 if (c.excludeExternal) {
@@ -196,7 +213,6 @@ while (!completed) {
   }
 }
 data.flatContains = data.flatContains.filter(v => v[0] !== '')
-
 if (c.check) {
   const cycles = util.findCycleDependencies(data.flatDependencies)
   if (cycles.length > 0) {
@@ -211,7 +227,7 @@ if (c.check) {
   }
 } else {
   const result = generateOutput(c.outputFormat, data)
-  if (c.outputFile) {
+  if (c.outputFile && c.outputFile !== '') {
     Deno.writeTextFileSync(c.outputFile, result)
   } else {
     console.log(result)
@@ -231,7 +247,7 @@ function stripByDepth (s: string, depth: number, separator: string) {
   return arr.slice(0, depth).join(separator)
 }
 
-function parseFilters (filters: string[]) : ls.PathFilters {
+function parseFilters (filters: string[]) : PathFilters {
   const includeFilters : RegExp[] = []
   const excludeFilters : RegExp[] = []
   for (const f of filters) {

@@ -54,6 +54,7 @@ deno run -A https://deno.land/x/sourcedep/sd.ts --if=-test -f dgml d:\src\myproj
 
 ## road map
 
+- combine path dependencies and module dependencies to simplify logic
 - support top 50 language in TOIBE index
 
 welcome to send pull request to add support for any other language.

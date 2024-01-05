@@ -1,44 +1,16 @@
 import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
 // import xmldoc from 'xmldoc'
 import * as util from './util.ts'
+import { PathFilters, ParseContext, LanguageService, DependencyInfo } from './language-service-interface.ts'
+import { NpmPackageService } from './language-service-npm.ts'
 
-export type PathFilters = {
-  includeFilters: RegExp[],
-  excludeFilters: RegExp[]
-}
-
-type ParseContext = {
-  pathFilters: PathFilters,
-  rootDir: string,
-  files: string[],
-  currentFile: string,
-  fileContent: string,
-  lineNumber: number,
-  line: string
-}
-
-type ParseResult = {
-  module?: string,
-  pathDependencies?: string[]
-  moduleDependencies?: { [id: string]: string[] }
-}
-
-export type DependencyInfo = {
-  path2module: { [id: string]: string }
-  module2path: { [id: string]: string }
-  pathDependencies: { [id: string]: string[] }
-  moduleDependencies: { [id: string]: string[] }
-  moduleSeparator: string
-}
-
-interface LanguageService {
-  name: string
-  exts: string[]
-  desc?: string
-  moduleSeparator?: string
-  parseSingleLine?(context: ParseContext): ParseResult
-  parse?(context: ParseContext): ParseResult
-  getResolveCandidates?(f: string) : string[]
+const rawLanguageService: LanguageService = {
+  name: 'raw',
+  exts: [],
+  desc: 'raw dependency data',
+  parse: function (context: ParseContext) {
+    return JSON.parse(context.fileContent)
+  }
 }
 
 const jsLanguageService: LanguageService = {
@@ -187,72 +159,6 @@ const PythonLanguageService: LanguageService = {
   }
 }
 
-const NpmPackageService: LanguageService = {
-  name: 'npm',
-  exts: ['.json'], // we look only into `package.json`
-  parse: function (context: ParseContext) {
-    type PackageDependencies = { [key: string]: string[] }
-    if (context.currentFile !== 'package.json') return {}
-    const getDirectDependency = (dir: string) => {
-      if (!util.applyFiltersToStr(dir, context.pathFilters.includeFilters, context.pathFilters.excludeFilters)) return []
-      try {
-        const pkg = JSON.parse(Deno.readTextFileSync(path.join(dir, 'package.json')))
-        const deps = pkg.dependencies as PackageDependencies || {}
-        return Object.keys(deps)
-      } catch (_e) {
-        return []
-      }
-    }
-    const getAllPossibleDependencyDirs = (dir: string, dep: string) => {
-      const result: string[] = []
-      const parts = dir.split(path.SEP_PATTERN)
-      while (parts.length > 0) {
-        result.push(path.join(...parts, 'node_modules', dep))
-        parts.pop()
-      }
-      return result
-    }
-    const getFirstUnprocessedDependency = (deps: PackageDependencies) => {
-      for (const pkg in deps) {
-        for (const dep of deps[pkg]) {
-          if (!deps[dep]) {
-            return dep
-          }
-        }
-      }
-      return null
-    }
-
-    const deps: PackageDependencies = {}
-    const dir = path.dirname(path.join(context.rootDir, context.currentFile))
-    const myName = dir.split(path.SEP_PATTERN).pop() as string
-    deps[myName] = getDirectDependency(dir)
-
-    while (true) {
-      const dep = getFirstUnprocessedDependency(deps)
-      if (!dep) {
-        break
-      }
-      deps[dep] = []
-      const dirs = getAllPossibleDependencyDirs(dir, dep)
-      for (const d of dirs) {
-        const dd = getDirectDependency(d)
-        if (dd.length > 0) {
-          deps[dep] = dd
-          break
-        }
-      }
-    }
-
-    const translate = (s:string) => s.replaceAll(/-/g, '/')
-    const moduleDependencies: {[id:string]:string[]} = {}
-    for (const pkg in deps) {
-      moduleDependencies[translate(pkg)] = deps[pkg].map(translate)
-    }
-    return { moduleDependencies }
-  }
-}
-
 const languageServiceRegistry: LanguageService[] = [
   jsLanguageService,
   tsLanguageService,
@@ -261,7 +167,8 @@ const languageServiceRegistry: LanguageService[] = [
   CppLanguageService,
   PythonLanguageService,
   CsharpLanguageService,
-  NpmPackageService
+  NpmPackageService,
+  rawLanguageService
 ]
 
 /**
@@ -285,7 +192,7 @@ function cancelDot (s: string) {
 function resolvePath (files: string[], parent: string, candidates: string[], strictMatch: boolean) {
   for (const c of candidates) {
     const cc = cancelDot(c)
-    const pc = cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc)
+    const pc = path.isAbsolute(cc) ? path.relative(parent, cc) : (cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc))
     const result = files.find(f => {
       if (strictMatch) {
         return f === pc
@@ -317,9 +224,16 @@ export function getLanguageExtensions(language: string) {
   return getLanguageService(language)?.exts
 }
 
-export type NameResolver = (name: string) => string|null
+export type CallContext = {
+  nameResolver: (name: string) => string|null
+  progressCallback?: util.ProgressCallback
+  // deno-lint-ignore no-explicit-any
+  languageOption: any
+  // deno-lint-ignore no-explicit-any
+  debugOutput: (...data: any[]) => void
+}
 
-export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, resolver: NameResolver, progressCallback?: util.ProgressCallback) {
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, callContext: CallContext) {
   const ls = languageServiceRegistry.find(s => s.name === language)
   if (!ls) {
     throw Error(`unsupported language: ${language}`)
@@ -340,10 +254,15 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     fileContent: '',
     lineNumber: 0,
     line: '',
-    pathFilters
+    pathFilters,
+    nameResolver: callContext.nameResolver,
+    languageOption: callContext.languageOption,
+    debugOutput: callContext.debugOutput
   }
 
-  const marker = new util.ProgressMarker(files.length, progressCallback)
+  callContext.debugOutput('context: ', context)
+
+  const marker = new util.ProgressMarker(files.length, callContext.progressCallback)
   for (const f of files) {
     marker.advance(1)
     context.currentFile = f
@@ -352,7 +271,7 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
 
     const parent = path.dirname(f)
     const ext = path.extname(f)
-    if (!scanAll && ls.exts.indexOf(ext) < 0) {
+    if (!scanAll && ls.exts.length > 0 && ls.exts.indexOf(ext) < 0) {
       // not a recognizable source file
       continue
     }
@@ -363,8 +282,20 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
 
     if (ls.parse) {
       const pr = ls.parse(context)
+      // hacky: special handling of dep language service
+      if (ls.name === 'raw') {
+        return pr as unknown as DependencyInfo
+      }
       if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
-      if (pr.moduleDependencies) data.moduleDependencies = { ...data.moduleDependencies, ...pr.moduleDependencies }
+      if (pr.moduleDependencies) {
+        for (const m of Object.keys(pr.moduleDependencies)) {
+          if (m in data.moduleDependencies) {
+            data.moduleDependencies[m].push(...pr.moduleDependencies[m])
+          } else {
+            data.moduleDependencies[m] = pr.moduleDependencies[m]
+          }
+        }
+      }
       if (pr.module) module = pr.module
     } else if (ls.parseSingleLine) {
       const lines = content.split(/\r?\n/)
@@ -386,13 +317,15 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
 
     const resolvePathDependency = (d: string) => {
       const cd = cancelDot(d)
-      const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(cd) : []
+      const resolvedDir = callContext.nameResolver(cd)
+      context.debugOutput('dir resolving: ', cd, ' => ', resolvedDir)
+      const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
       return resolvePath(files, parent, [cd, ...candidates], strictMatch)
     }
     data.pathDependencies[f] = pathDependencies.map(d => {
       const d1 = resolvePathDependency(d)
       if (d1 !== null) return d1
-      const dr = resolver(d)
+      const dr = callContext.nameResolver(d)
       if (dr !== null) {
         const d2 = resolvePathDependency(dr)
         if (d2 !== null) return d2
