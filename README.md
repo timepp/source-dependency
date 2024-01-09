@@ -32,7 +32,7 @@ deno run -A https://deno.land/x/sourcedep/sd.ts --if=-test -f dgml d:\src\myproj
 
 ### usage demo
 
-![demo](demo.gif)
+![demo](doc/gallery/demo.gif)
 
 ### gallery
 
@@ -53,10 +53,6 @@ deno run -A https://deno.land/x/sourcedep/sd.ts --if=-test -f dgml d:\src\myproj
 ![this project](doc/gallery/visjs.png)
 
 ## TODOs
-
-### BUG: C++: `#include "..."` need to resolve dependency in current directory
-
-This can be done by changing dependencies path in the Clanguage parser
 
 ### support top 50 language in TOIBE index
 
