@@ -9,11 +9,14 @@ import * as util from './util.ts'
 import { generateOutput, getAllGenerators } from './generator.ts'
 
 const defaultConfig = {
+  // TODO: remove this, use can set this as input filters per needs
   excludeWellKnownAuxiliaryFolders: true,
-  inputFilters: new Array<string>(),
+  inputFilters: [] as string[],
   excludeExternal: false,
-  resultFilters: new Array<string>(),
-  inputPathMapping: new Array<string>(),
+  resultFilters: [] as string[],
+  rootNodesFilters: [] as string[],
+  inputPathMapping: [] as string[],
+  modulePathSeparator: '',
   prefix: '',
   language: 'typescript',
   languageOption: '{}',
@@ -21,7 +24,6 @@ const defaultConfig = {
   outputFormat: 'plain',
   outputFile: '',
   configFile: '',
-  forceShowingPathDependency: false,
   depth: '',
   check: false,
   debug: false
@@ -33,13 +35,14 @@ const configDescription: {[P in keyof typeof defaultConfig]: [/*doc*/string, /*a
   inputPathMapping: ['input path mapping, e.g. `a=b` means replace `a` with `b` in input paths', 'ipm'],
   excludeExternal: ['exclude external dependencies', ''],
   resultFilters: ['result filters', 'rf'],
+  rootNodesFilters: ['filters to pick root nodes', 'nf'],
+  modulePathSeparator: ['override language defined module path separator', 's'],
   prefix: ['prefix', 'p'],
   language: [`languages, all supported languages are: ${ls.getSupportedLanguages().join(',')}`, 'l'],
   languageOption: ['language options, see below section for description', 'lo'],
   target: ['target, can be a file or a folder', ''],
   outputFormat: ['output format, see below section for description', 'f'],
   outputFile: ['output file', 'o'],
-  forceShowingPathDependency: ['force showing path dependency', ''],
   depth: ['depth', ''],
   check: ['check', ''],
   configFile: ['config file', 'c'],
@@ -102,6 +105,7 @@ if (c.excludeWellKnownAuxiliaryFolders) {
   pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
 }
 const resultTextFilters = parseFilters(c.resultFilters)
+const rootNodesFilters = parseFilters(c.rootNodesFilters)
 const languageOption = (typeof c.languageOption === 'string')? json5.parse(c.languageOption): c.languageOption
 const strictMatching = false
 
@@ -147,47 +151,78 @@ const callContext = {
   languageOption
 }
 
-const dependencyInfo = ls.parse(path.resolve(dir), relativeFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, 
+const deps = ls.parse(path.resolve(dir), relativeFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, 
   strictMatching, pathFilters, callContext)
 
-let dependencies = dependencyInfo.pathDependencies
-if (Object.keys(dependencyInfo.moduleDependencies).length > 0 && !c.forceShowingPathDependency) {
-  dependencies = dependencyInfo.moduleDependencies
-}
-
 const data: DependencyData = {
-  rawInfo: dependencyInfo,
-  dependencies,
+  dependencies: {...deps},
   flatDependencies: [],
   contains: {},
   flatContains: []
 }
 
-if (c.excludeExternal) {
-  for (const k of Object.keys(data.dependencies)) {
-    data.dependencies[k] = data.dependencies[k].filter(v => !v.startsWith('*external*'))
+// `external` means the entity doesn't appear in the key of `dependencies`
+// if there is an internal entity which doesn't have a dependency, its dependency array will be empty, 
+// this can be used to differentiate `external` and `internal`
+for (const k of Object.keys(data.dependencies)) {
+  if (c.excludeExternal) {
+    data.dependencies[k] = data.dependencies[k].filter(v => v in data.dependencies)
+  } else {
+    data.dependencies[k] = data.dependencies[k].map(v => v in data.dependencies? v: `*external/${v}`)
   }
-  delete data.contains['*external*']
 }
 
 for (const k of Object.keys(data.dependencies)) {
-  for (const v of data.dependencies[k]) {
-    if (util.applyFiltersToStr(k, resultTextFilters.includeFilters, resultTextFilters.excludeFilters) ||
-      util.applyFiltersToStr(v, resultTextFilters.includeFilters, resultTextFilters.excludeFilters)) {
-      data.flatDependencies.push([k, v])
+  if (!applyFilters(k, resultTextFilters)) {
+    delete data.dependencies[k]
+    continue
+  }
+  data.dependencies[k] = data.dependencies[k].filter(v => applyFilters(v, resultTextFilters))
+}
+
+// apply root nodes filters
+const rootNodes = Object.keys(data.dependencies).filter(v => applyFilters(v, rootNodesFilters))
+const rootNodesSet = new Set(rootNodes)
+let hasNewChanges = true
+while (hasNewChanges) {
+  const oldSize = rootNodesSet.size
+  for (const k of rootNodesSet) {
+    if (k in data.dependencies) {
+      for (const v of data.dependencies[k]) {
+        rootNodesSet.add(v)
+      }
     }
+  }
+  hasNewChanges = rootNodesSet.size !== oldSize
+}
+for (const k of Object.keys(data.dependencies)) {
+  if (!rootNodesSet.has(k)) {
+    delete data.dependencies[k]
+  }
+}
+
+// build flat dependencies
+for (const k in data.dependencies) {
+  for (const v of data.dependencies[k]) {
+    data.flatDependencies.push([k, v])
   }
 }
 
 data.flatDependencies = data.flatDependencies.map(v => [trimPrefix(v[0], c.prefix), trimPrefix(v[1], c.prefix)])
-data.contains = util.buildHierarchy(data.flatDependencies.flat(), dependencyInfo.moduleSeparator)
+
+let sep = c.modulePathSeparator
+if (sep === '') {
+  sep = ls.getLanguageService(c.language).moduleSeparator || '/'
+}
+const moduleSeparator = new RegExp(sep, 'g')
+data.contains = util.buildHierarchy(data.flatDependencies.flat(), moduleSeparator)
 
 if (c.depth) {
   const [d1, d2 = 0] = c.depth.split(',').map(v => parseInt(v))
   const deps: [string, string][] = []
   for (const v of data.flatDependencies) {
-    const a = stripByDepth(v[0], v[0] in data.dependencies ? d1 : d2, dependencyInfo.moduleSeparator)
-    const b = stripByDepth(v[1], v[1] in data.dependencies ? d1 : d2, dependencyInfo.moduleSeparator)
+    const a = stripByDepth(v[0], v[0] in data.dependencies ? d1 : d2, moduleSeparator)
+    const b = stripByDepth(v[1], v[1] in data.dependencies ? d1 : d2, moduleSeparator)
     if (a && b && a !== b) deps.push([a, b])
   }
   data.flatDependencies = []
@@ -198,6 +233,7 @@ if (c.depth) {
 }
 util.walkHierarchy(data.contains, (a, b) => data.flatContains.push([a, b]))
 
+// collapse single route
 let completed = false
 while (!completed) {
   completed = true
@@ -213,6 +249,7 @@ while (!completed) {
   }
 }
 data.flatContains = data.flatContains.filter(v => v[0] !== '')
+
 if (c.check) {
   const cycles = util.findCycleDependencies(data.flatDependencies)
   if (cycles.length > 0) {
@@ -241,10 +278,15 @@ function trimPrefix (s:string, prefix:string|undefined) {
   return s
 }
 
-function stripByDepth (s: string, depth: number, separator: string) {
+function stripByDepth (s: string, depth: number, separator: RegExp) {
   if (depth === 0) return s
-  const arr = s.split(separator)
-  return arr.slice(0, depth).join(separator)
+  let r
+  let ss = s
+  while (depth > 0 && (r = separator.exec(s))) {
+    ss = s.slice(r.index)
+    depth--
+  }
+  return ss
 }
 
 function parseFilters (filters: string[]) : PathFilters {
@@ -260,4 +302,8 @@ function parseFilters (filters: string[]) : PathFilters {
     }
   }
   return { includeFilters, excludeFilters }
+}
+
+function applyFilters (str: string, pf: PathFilters) {
+  return util.applyFiltersToStr(str, pf.includeFilters, pf.excludeFilters)
 }

@@ -1,7 +1,7 @@
 import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
 // import xmldoc from 'xmldoc'
 import * as util from './util.ts'
-import { PathFilters, ParseContext, LanguageService, DependencyInfo } from './language-service-interface.ts'
+import { PathFilters, ParseContext, LanguageService, Dependencies } from './language-service-interface.ts'
 import { NpmPackageService } from './language-service-npm.ts'
 
 const rawLanguageService: LanguageService = {
@@ -23,7 +23,7 @@ const jsLanguageService: LanguageService = {
     if (r) dependencies.push(r[1])
     r = context.line.match(/(require|import)\s*\(['"]([^'"]+)['"]\)/)
     if (r) dependencies.push(r[2])
-    return { pathDependencies: dependencies }
+    return {[context.currentFile]: dependencies}
   },
   getResolveCandidates: function (f: string) {
     const candidates = [
@@ -46,7 +46,7 @@ const tsLanguageService: LanguageService = {
       if (r === null) break
       deps.push(r[2])
     }
-    return { pathDependencies: deps }
+    return {[context.currentFile]: deps}
   },
   getResolveCandidates: function (f: string) {
     const candidates = [
@@ -63,7 +63,7 @@ const CsharpLanguageService: LanguageService = {
   moduleSeparator: '.',
   parseSingleLine: function (context: ParseContext) {
     const dependencies = []
-    let module
+    let module = context.currentFile
     let r = context.line.match(/^\s*namespace\s+(.*)\s*$/)
     if (r) {
       module = r[1]
@@ -72,10 +72,7 @@ const CsharpLanguageService: LanguageService = {
     if (r) {
       dependencies.push(r[1])
     }
-    return {
-      module: module,
-      moduleDependencies: { module: dependencies }
-    }
+    return {[module]: dependencies}
   }
 }
 
@@ -85,7 +82,7 @@ const javaLanguageService: LanguageService = {
   moduleSeparator: '.',
   parseSingleLine: function (context: ParseContext) {
     const dependencies = []
-    let module
+    let module = context.currentFile
     let r = context.line.match(/^package (.*);$/)
     if (r) {
       module = r[1] + '.' + path.parse(context.currentFile).name
@@ -94,32 +91,20 @@ const javaLanguageService: LanguageService = {
     if (r) {
       dependencies.push(r[2])
     }
-    return {
-      module: module,
-      moduleDependencies: { module: dependencies }
-    }
+    return {[module]: dependencies}
   }
 }
 
 function parseCLikeLanguage (context: ParseContext) {
   const dependencies = []
-  let module
   let r = context.line.match(/^\s*#\s*include\s*<([^\s]+)>\s*$/)
   if (r) dependencies.push(r[1])
   r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
-  if (r) dependencies.push(r[1])
-  if (context.lineNumber === 1) {
-    const base = util.stripExt(context.currentFile)
-    if (context.files.find(f => f !== context.currentFile && util.stripExt(f) === base)) {
-      module = base
-    } else {
-      module = context.currentFile
-    }
+  if (r) {
+    // TODO for "" style includes, we need to search the file directly in current directory here
+    dependencies.push(r[1])
   }
-  return {
-    module: module,
-    pathDependencies: dependencies
-  }
+  return {[context.currentFile]: dependencies}
 }
 
 const CLanguageService = {
@@ -154,8 +139,7 @@ const PythonLanguageService: LanguageService = {
     if (r) dependencies.push(r[2])
 
     const deps = dependencies.map(v => v.replaceAll('.', '/') + '.py')
-
-    return { pathDependencies: deps }
+    return {[context.currentFile]: deps}
   }
 }
 
@@ -213,7 +197,11 @@ function joinPath (a: string, b: string) {
 }
 
 export function getLanguageService (name: string) {
-  return languageServiceRegistry.find(s => s.name === name)
+  const ls = languageServiceRegistry.find(s => s.name === name)
+  if (!ls) {
+    throw Error(`unsupported language: ${name}`)
+  }
+  return ls
 }
 
 export function getSupportedLanguages () {
@@ -233,19 +221,24 @@ export type CallContext = {
   debugOutput: (...data: any[]) => void
 }
 
-export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, callContext: CallContext) {
-  const ls = languageServiceRegistry.find(s => s.name === language)
-  if (!ls) {
-    throw Error(`unsupported language: ${language}`)
+export function mergeDependencies (d1: Dependencies, d2: Dependencies) {
+  const result: Dependencies = {}
+  for (const k in d1) {
+    result[k] = [...d1[k]]
   }
+  for (const k in d2) {
+    if (k in result) {
+      result[k].push(...d2[k])
+    } else {
+      result[k] = [...d2[k]]
+    }
+  }
+  return result
+}
 
-  const data: DependencyInfo = {
-    path2module: {},
-    module2path: {},
-    pathDependencies: {},
-    moduleDependencies: {},
-    moduleSeparator: ls.moduleSeparator || '/'
-  }
+export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, callContext: CallContext) {
+  const ls = getLanguageService(language)
+  let data: Dependencies = {}
 
   const context: ParseContext = {
     rootDir: dir,
@@ -266,9 +259,6 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
   for (const f of files) {
     marker.advance(1)
     context.currentFile = f
-    const pathDependencies = []
-    let module = ''
-
     const parent = path.dirname(f)
     const ext = path.extname(f)
     if (!scanAll && ls.exts.length > 0 && ls.exts.indexOf(ext) < 0) {
@@ -280,39 +270,20 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
     const content = Deno.readTextFileSync(fullName)
     context.fileContent = content
 
+    let pr: Dependencies = {}
     if (ls.parse) {
-      const pr = ls.parse(context)
+      pr = ls.parse(context)
       // hacky: special handling of dep language service
       if (ls.name === 'raw') {
-        return pr as unknown as DependencyInfo
+        return pr
       }
-      if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
-      if (pr.moduleDependencies) {
-        for (const m of Object.keys(pr.moduleDependencies)) {
-          if (m in data.moduleDependencies) {
-            data.moduleDependencies[m].push(...pr.moduleDependencies[m])
-          } else {
-            data.moduleDependencies[m] = pr.moduleDependencies[m]
-          }
-        }
-      }
-      if (pr.module) module = pr.module
     } else if (ls.parseSingleLine) {
       const lines = content.split(/\r?\n/)
       for (let i = 0; i < lines.length; i++) {
         context.line = lines[i]
         context.lineNumber = i + 1
-        const pr = ls.parseSingleLine(context)
-        if (pr.pathDependencies) pathDependencies.push(...pr.pathDependencies)
-        if (pr.moduleDependencies) data.moduleDependencies = { ...data.moduleDependencies, ...pr.moduleDependencies }
-        if (pr.module) module = pr.module
+        pr = mergeDependencies(pr, ls.parseSingleLine(context))
       }
-    }
-
-    // resolve dependencies
-    if (module) {
-      data.path2module[f] = module
-      data.module2path[module] = f
     }
 
     const resolvePathDependency = (d: string) => {
@@ -322,46 +293,21 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
       const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
       return resolvePath(files, parent, [cd, ...candidates], strictMatch)
     }
-    data.pathDependencies[f] = pathDependencies.map(d => {
-      const d1 = resolvePathDependency(d)
-      if (d1 !== null) return d1
-      const dr = callContext.nameResolver(d)
-      if (dr !== null) {
-        const d2 = resolvePathDependency(dr)
-        if (d2 !== null) return d2
-      }
-      return '*external*/' + d
-    })
-  }
-
-  // path dependencies can be built from module dependencies (if any)
-  for (const d of Object.keys(data.moduleDependencies)) {
-    const f = data.module2path[d]
-    if (f) {
-      const paths = data.moduleDependencies[d].map(v => data.module2path[v] || '*external*/*modules*/' + v)
-      if (paths.length > 0) {
-        if (f in data.pathDependencies) {
-          data.pathDependencies[f].push(...paths)
-        } else {
-          data.pathDependencies[f] = paths
+    for (const k in pr) {
+      const deps = pr[k]
+      pr[k] = deps.map(v => {
+        const d1 = resolvePathDependency(v)
+        if (d1 !== null) return d1
+        const dr = callContext.nameResolver(v)
+        if (dr !== null) {
+          const d2 = resolvePathDependency(dr)
+          if (d2 !== null) return d2
         }
-      }
+        return v
+      })
     }
-  }
 
-  // module dependencies can be built from path dependencies
-  for (const p of Object.keys(data.pathDependencies)) {
-    const m = data.path2module[p]
-    if (m) {
-      const modules = data.pathDependencies[p].map(v => data.path2module[v] || v)
-      if (modules.length > 0) {
-        if (m in data.moduleDependencies) {
-          data.moduleDependencies[m].push(...modules)
-        } else {
-          data.moduleDependencies[m] = modules
-        }
-      }
-    }
+    data = mergeDependencies(data, pr)
   }
 
   return data

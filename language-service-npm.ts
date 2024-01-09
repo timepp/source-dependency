@@ -1,9 +1,7 @@
 import { LanguageService, ParseContext } from './language-service-interface.ts'
-import * as util from './util.ts'
 import * as path from "https://deno.land/std@0.198.0/path/mod.ts"
 
 type PackageDependencies = { [key: string]: string[] }
-
 let globalContext: ParseContext | null = null
 
 function getGlobalContext() {
@@ -31,84 +29,21 @@ export const NpmPackageService: LanguageService = {
             devDependencies?: boolean
         }
         const lo = context.languageOption as LanguageOption
-        function getDirectDependency(dir: string): [string, string, string[]] {
-            if (!util.applyFiltersToStr(dir, context.pathFilters.includeFilters, context.pathFilters.excludeFilters)) {
-                return ["filtered", '', []]
-            }
-            try {
-                const pkg = JSON.parse(Deno.readTextFileSync(path.join(dir, 'package.json')))
-                const deps = (lo.devDependencies ? pkg.devDependencies : pkg.dependencies) as PackageDependencies || {}
-                debugOutput('direct dependencies: ', dir, deps)
-                return ["succeeded", pkg.name, Object.keys(deps)]
-            } catch (_e) {
-                debugOutput('failed to parse package.json: ', dir)
-                return ["parseFailed", '', []]
-            }
-        }
-        const getAllPossibleDependencyDirs = (dir: string, dep: string) => {
-            const result: string[] = []
-            const resolvedDir = context.nameResolver(dep)
-            if (resolvedDir) {
-                result.push(resolvedDir)
-            }
-            const parts = dir.split(path.SEP_PATTERN)
-            while (parts.length > 0) {
-                result.push(path.join(...parts, 'node_modules', dep))
-                parts.pop()
-            }
-            return result
-        }
-        const getFirstUnprocessedDependency = (deps: PackageDependencies) => {
-            for (const pkg in deps) {
-                for (const dep of deps[pkg]) {
-                    if (!deps[dep]) {
-                        return dep
-                    }
-                }
-            }
-            return null
-        }
         const parsePackageJsonDirectly = () => {
             const deps: PackageDependencies = {}
-            const dir = path.dirname(path.join(context.rootDir, context.currentFile))
             // const myName = dir.split(path.SEP_PATTERN).pop() as string
-            const [r, myName, arr] = getDirectDependency(dir)
+            const [r, myName, arr] = getDirectDependency(path.join(context.rootDir, context.currentFile), lo.devDependencies || false)
             debugOutput(`parse result: ${r}`)
             deps[myName] = arr
-
-            while (true) {
-                const dep = getFirstUnprocessedDependency(deps)
-                if (!dep) {
-                    break
-                }
-                deps[dep] = []
-                const dirs = getAllPossibleDependencyDirs(dir, dep)
-                const results: string[] = []
-                for (const d of dirs) {
-                    const [r, _name, dd] = getDirectDependency(d)
-                    results.push(r)
-                    if (r === 'succeeded') {
-                        debugOutput(`dependency ${dep} resolved in ${d}`)
-                        deps[dep] = dd
-                        break
-                    }
-                }
-                if (results.every(v => v !== 'succeeded')) {
-                    debugOutput(`dependency ${dep} not resolved with following search list: `)
-                    dirs.forEach((d, i) => {
-                        debugOutput(`  %c[${results[i]}]: %c${d}`, 'color: red', 'color: blue')
-                    })
-                }
-            }
             return deps
         }
 
         if (!context.currentFile.endsWith('package.json')) return {}
         globalContext = context
-        const currentDir = path.dirname(path.join(context.rootDir, context.currentFile))
-        debugOutput(`parsing npm project ${currentDir} with options: `, lo)
+        debugOutput(`parsing npm project ${context.currentFile} with options: `, lo)
         let deps: PackageDependencies = {}
         if (lo.getDependencyFromLockFile) {
+            const currentDir = path.dirname(path.join(context.rootDir, context.currentFile))
             const lockFile = path.join(currentDir, 'yarn.lock')
             deps = parseYarnLock(lockFile)
             if (Object.keys(deps).length === 0) {
@@ -123,7 +58,18 @@ export const NpmPackageService: LanguageService = {
         }
 
         debugOutput('dependencies: ', deps)
-        return { moduleDependencies: deps }
+        return deps
+    }
+}
+
+function getDirectDependency(file: string, devDependencies: boolean): [string, string, string[]] {
+    try {
+        const pkg = JSON.parse(Deno.readTextFileSync(file))
+        const deps = (devDependencies ? pkg.devDependencies : pkg.dependencies) as PackageDependencies || {}
+        return ["succeeded", pkg.name, Object.keys(deps)]
+    } catch (_e) {
+        debugOutput('failed to parse ', file)
+        return ["parseFailed", '', []]
     }
 }
 

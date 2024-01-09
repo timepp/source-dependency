@@ -52,9 +52,12 @@ deno run -A https://deno.land/x/sourcedep/sd.ts --if=-test -f dgml d:\src\myproj
 
 ![this project](doc/gallery/visjs.png)
 
-## road map
+## TODOs
 
-- combine path dependencies and module dependencies to simplify logic
-- support top 50 language in TOIBE index
+### BUG: C++: `#include "..."` need to resolve dependency in current directory
+
+This can be done by changing dependencies path in the Clanguage parser
+
+### support top 50 language in TOIBE index
 
 welcome to send pull request to add support for any other language.

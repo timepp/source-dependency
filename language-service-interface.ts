@@ -19,37 +19,22 @@ export type ParseContext = {
     // deno-lint-ignore no-explicit-any
     debugOutput: (...data: any[]) => void
 }
-
-export type ParseResult = {
-    // for languages or parse configurations that module is something other than file name
-    // if this is omit from result, it will be treated as file name
-    module?: string,
-    pathDependencies?: string[]
-    moduleDependencies?: { [id: string]: string[] }
-}
+export type StringPair = [string, string]
+export type Dependencies = {[id:string]: string[]}
 
 export interface LanguageService {
     name: string
     exts: string[]
     desc?: string
     moduleSeparator?: string
-    parseSingleLine?(context: ParseContext): ParseResult
-    parse?(context: ParseContext): ParseResult
+    parseSingleLine?(context: ParseContext): Dependencies
+    parse?(context: ParseContext): Dependencies
     getResolveCandidates?(f: string): string[]
 }
 
-export type DependencyInfo = {
-    path2module: { [id: string]: string }
-    module2path: { [id: string]: string }
-    pathDependencies: { [id: string]: string[] }
-    moduleDependencies: { [id: string]: string[] }
-    moduleSeparator: string
-}
-
 export type DependencyData = {
-    rawInfo: DependencyInfo,
-    dependencies: { [id: string]: string[] },
-    flatDependencies: [string, string][],
+    dependencies: Dependencies,
     contains: util.RecursiveObject,
-    flatContains: [string, string][]
+    flatDependencies: StringPair[],
+    flatContains: StringPair[]
 }

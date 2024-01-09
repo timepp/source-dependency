@@ -22,26 +22,21 @@ export function applyFiltersToStr (str: string, includeFilters: RegExp[], exclud
 }
 
 export type RecursiveObject = {
-  [key: string]: RecursiveObject | null
+  [key: string]: RecursiveObject
 }
 
-export function buildHierarchy (arr: string[], separator: string, hierarchy: RecursiveObject = {}) {
+export function buildHierarchy (arr: string[], separator: RegExp, hierarchy: RecursiveObject = {}) {
+  if (!separator.global) throw new Error('separator must be global')
   for (const s of arr) {
-    const parts = s.split(separator)
     let o = hierarchy
-    for (let i = 0; i < parts.length; i++) {
-      const key = parts.slice(0, i + 1).join(separator)
-      if (!(key in o) || o[key] === null) {
-        if (i === parts.length - 1) {
-          o[key] = null
-        } else {
-          const subObject: RecursiveObject = {}
-          o[key] = subObject
-        }
+    while (true) {
+      const r = separator.exec(s)
+      const part = r? s.slice(0, r.index): s
+      if (!(part in o)) {
+        o[part] = {}
       }
-      const subObject = o[key]
-      if (subObject === null) break
-      o = subObject
+      o = o[part]
+      if (!r) break
     }
   }
   return hierarchy

@@ -11,6 +11,8 @@ Deno.test("util.findCycles", () => {
 })
 
 Deno.test('hierarchy', () => {
-    const hierarchy = util.buildHierarchy(['a/b', 'a/b/d', 'a/e', 'f/g'], '/')
-    ut.assertEquals(hierarchy, { a: { 'a/b': { 'a/b/d': null }, 'a/e': null }, f: { 'f/g': null } })
+    let hierarchy = util.buildHierarchy(['a/b', 'a/b/d', 'a/e', 'f/g'], /\//g)
+    ut.assertEquals(hierarchy, { a: { 'a/b': { 'a/b/d': {} }, 'a/e': {} }, f: { 'f/g': {} } })
+    hierarchy = util.buildHierarchy(['@msteams/components-acc-def'], /[/-]/g)
+    ut.assertEquals(hierarchy, { '@msteams': { '@msteams/components': { '@msteams/components-acc': {'@msteams/components-acc-def': {}}}}})
 })

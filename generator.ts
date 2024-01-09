@@ -29,7 +29,7 @@ function generatePlain (data: DependencyData) {
 }
 
 function generateRaw (data: DependencyData) {
-    return JSON.stringify(data.rawInfo, null, 4)
+    return JSON.stringify(data.dependencies, null, 4)
 }
 
 function generateDGML (data: DependencyData) {
