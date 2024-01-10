@@ -32,18 +32,18 @@ export const NpmPackageService: LanguageService = {
         const parsePackageJsonDirectly = () => {
             const deps: PackageDependencies = {}
             // const myName = dir.split(path.SEP_PATTERN).pop() as string
-            const [r, myName, arr] = getDirectDependency(path.join(context.rootDir, context.currentFile), lo.devDependencies || false)
+            const [r, myName, arr] = getDirectDependency(path.join(context.rootDir, context.file), lo.devDependencies || false)
             debugOutput(`parse result: ${r}`)
             deps[myName] = arr
             return deps
         }
 
-        if (!context.currentFile.endsWith('package.json')) return {}
+        if (!context.file.endsWith('package.json')) return {}
         globalContext = context
-        debugOutput(`parsing npm project ${context.currentFile} with options: `, lo)
+        debugOutput(`parsing npm project ${context.file} with options: `, lo)
         let deps: PackageDependencies = {}
         if (lo.getDependencyFromLockFile) {
-            const currentDir = path.dirname(path.join(context.rootDir, context.currentFile))
+            const currentDir = path.dirname(path.join(context.rootDir, context.file))
             const lockFile = path.join(currentDir, 'yarn.lock')
             deps = parseYarnLock(lockFile)
             if (Object.keys(deps).length === 0) {

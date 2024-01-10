@@ -4,51 +4,33 @@ import * as util from './util.ts'
 import { PathFilters, ParseContext, LanguageService, Dependencies } from './language-service-interface.ts'
 import { NpmPackageService } from './language-service-npm.ts'
 
-const rawLanguageService: LanguageService = {
-  name: 'raw',
-  exts: [],
-  desc: 'raw dependency data',
-  parse: function (context: ParseContext) {
-    return JSON.parse(context.fileContent)
+class RawLanguageService implements LanguageService {
+  name = 'raw'
+  desc = 'raw dependency data'
+  parse (context: ParseContext) {
+    return JSON.parse(context.fileContent())
   }
 }
 
-const jsLanguageService: LanguageService = {
-  name: 'javascript',
-  desc: 'javascript',
-  exts: ['.js', '.cjs', '.mjs', '.vue'],
-  parseSingleLine: function (context: ParseContext) {
-    const dependencies: string[] = []
-    let r = context.line.match(/^\s*import\s+.*\s+from\s+['"]([^'"]+)['"]\s*;?$/)
-    if (r) dependencies.push(r[1])
-    r = context.line.match(/(require|import)\s*\(['"]([^'"]+)['"]\)/)
-    if (r) dependencies.push(r[2])
-    return {[context.currentFile]: dependencies}
-  },
-  getResolveCandidates: function (f: string) {
-    const candidates = [
-      ...this.exts.map(v => f + v),
-      ...this.exts.map(v => f + '/index' + v)
-    ]
-    return candidates
-  }
+function matchExt(context: ParseContext, exts: string[]) {
+  return exts.indexOf(context.ext) >= 0
 }
 
-const tsLanguageService: LanguageService = {
-  name: 'typescript',
-  desc: 'typescript',
-  exts: ['.ts', '.tsx'],
-  parse: function (context: ParseContext) {
+class TsLanguageService implements LanguageService {
+  name = 'typescript'
+  exts = ['ts', 'tsx']
+  parse (context: ParseContext) {
+    if (!matchExt(context, this.exts)) return {}
     const matcher = /^\s*(import|export).*?\s+from\s+['"]([^'"]+)['"]\s*;?$/gms
     const deps: string[] = []
     while (true) {
-      const r = matcher.exec(context.fileContent)
+      const r = matcher.exec(context.fileContent())
       if (r === null) break
       deps.push(r[2])
     }
-    return {[context.currentFile]: deps}
-  },
-  getResolveCandidates: function (f: string) {
+    return {[context.file]: deps}
+  }
+  getResolveCandidates (f: string) {
     const candidates = [
       ...this.exts.map(v => f + v),
       ...this.exts.map(v => f + '/index' + v)
@@ -57,13 +39,19 @@ const tsLanguageService: LanguageService = {
   }
 }
 
+class JsLanguageService extends TsLanguageService {
+  name = 'javascript'
+  exts = ['.js', '.cjs', '.mjs', '.vue']
+}
+
+/*
 const CsharpLanguageService: LanguageService = {
   name: 'C#',
   exts: ['.cs'],
   moduleSeparator: '.',
   parseSingleLine: function (context: ParseContext) {
     const dependencies = []
-    let module = context.currentFile
+    let module = context.file
     let r = context.line.match(/^\s*namespace\s+(.*)\s*$/)
     if (r) {
       module = r[1]
@@ -82,10 +70,10 @@ const javaLanguageService: LanguageService = {
   moduleSeparator: '.',
   parseSingleLine: function (context: ParseContext) {
     const dependencies = []
-    let module = context.currentFile
+    let module = context.file
     let r = context.line.match(/^package (.*);$/)
     if (r) {
-      module = r[1] + '.' + path.parse(context.currentFile).name
+      module = r[1] + '.' + path.parse(context.file).name
     }
     r = context.line.match(/^import( static)? (.*);$/)
     if (r) {
@@ -94,6 +82,7 @@ const javaLanguageService: LanguageService = {
     return {[module]: dependencies}
   }
 }
+*/
 
 function parseCLikeLanguage (context: ParseContext) {
   const dependencies = []
@@ -101,7 +90,7 @@ function parseCLikeLanguage (context: ParseContext) {
   if (r) dependencies.push(r[1])
   r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
   if (r) {
-    const subDir = path.dirname(context.currentFile)
+    const subDir = path.dirname(context.file)
     const includePath = subDir + '/' + r[1]
     if (context.files.indexOf(includePath) >= 0) {
       dependencies.push(includePath)
@@ -109,7 +98,7 @@ function parseCLikeLanguage (context: ParseContext) {
       dependencies.push(r[1])
     }
   }
-  return {[context.currentFile]: dependencies}
+  return {[context.file]: dependencies}
 }
 
 const CLanguageService = {
@@ -124,6 +113,7 @@ const CppLanguageService = {
   parseSingleLine: parseCLikeLanguage
 }
 
+```
 const PythonLanguageService: LanguageService = {
   name: 'python',
   exts: ['.py'],
@@ -132,7 +122,7 @@ const PythonLanguageService: LanguageService = {
     let r = context.line.match(/^\s*import\s+(.*)$/)
     if (r) {
       for (const x of r[1].split(/\s*,\s*/g)) {
-        // `<module>` or `<module> as <alias>`
+        // <module> or <module> as <alias>
         dependencies.push(x.split(/\s+/g)[0])
       }
     }
@@ -144,20 +134,22 @@ const PythonLanguageService: LanguageService = {
     if (r) dependencies.push(r[2])
 
     const deps = dependencies.map(v => v.replaceAll('.', '/') + '.py')
-    return {[context.currentFile]: deps}
+    return {[context.file]: deps}
   }
 }
+```
 
 const languageServiceRegistry: LanguageService[] = [
-  jsLanguageService,
-  tsLanguageService,
+  new JsLanguageService(),
+  new TsLanguageService(),
   javaLanguageService,
   CLanguageService,
   CppLanguageService,
   PythonLanguageService,
   CsharpLanguageService,
   NpmPackageService,
-  rawLanguageService
+  new RawLanguageService(),
+  new A()
 ]
 
 /**
@@ -213,10 +205,6 @@ export function getSupportedLanguages () {
   return languageServiceRegistry.map(v => v.name)
 }
 
-export function getLanguageExtensions(language: string) {
-  return getLanguageService(language)?.exts
-}
-
 export type CallContext = {
   nameResolver: (name: string) => string|null
   progressCallback?: util.ProgressCallback
@@ -244,18 +232,34 @@ export function mergeDependencies (d1: Dependencies, d2: Dependencies) {
 export function parse (dir: string, files: string[], language: string, scanAll: boolean, strictMatch: boolean, pathFilters: PathFilters, callContext: CallContext) {
   const ls = getLanguageService(language)
   let data: Dependencies = {}
-
   const context: ParseContext = {
     rootDir: dir,
     files: files,
-    currentFile: '',
-    fileContent: '',
-    lineNumber: 0,
-    line: '',
+    file: '',
+    subDir: '',
+    ext: '',
+    _privateFileContent: '',
+    fileContent: function() {
+      if (this._privateFileContent === '') {
+        this._privateFileContent = Deno.readTextFileSync(this.rootDir + '/' + this.file)
+      }
+      return this._privateFileContent
+    },
+    lines: function() {
+      return this.fileContent().split(/\r?\n/)
+    },
     pathFilters,
     nameResolver: callContext.nameResolver,
     languageOption: callContext.languageOption,
     debugOutput: callContext.debugOutput
+  }
+
+  const resolvePathDependency = (d: string) => {
+    const cd = cancelDot(d)
+    const resolvedDir = callContext.nameResolver(cd)
+    context.debugOutput('dir resolving: ', cd, ' => ', resolvedDir)
+    const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
+    return resolvePath(files, context.subDir, [cd, ...candidates], strictMatch)
   }
 
   callContext.debugOutput('context: ', context)
@@ -263,56 +267,27 @@ export function parse (dir: string, files: string[], language: string, scanAll: 
   const marker = new util.ProgressMarker(files.length, callContext.progressCallback)
   for (const f of files) {
     marker.advance(1)
-    context.currentFile = f
-    const parent = path.dirname(f)
-    const ext = path.extname(f)
-    if (!scanAll && ls.exts.length > 0 && ls.exts.indexOf(ext) < 0) {
-      // not a recognizable source file
-      continue
-    }
+    context.file = f
+    context.subDir = path.dirname(f)
+    context.ext = path.extname(f)
 
-    const fullName = dir + '/' + f
-    const content = Deno.readTextFileSync(fullName)
-    context.fileContent = content
-
-    let pr: Dependencies = {}
-    if (ls.parse) {
-      pr = ls.parse(context)
-      // hacky: special handling of dep language service
-      if (ls.name === 'raw') {
-        return pr
+    for (const ls of languageServiceRegistry) {
+      const result = ls.parse(context)
+      for (const k in result) {
+        const deps = result[k]
+        result[k] = deps.map(v => {
+          const d1 = resolvePathDependency(v)
+          if (d1 !== null) return d1
+          const dr = callContext.nameResolver(v)
+          if (dr !== null) {
+            const d2 = resolvePathDependency(dr)
+            if (d2 !== null) return d2
+          }
+          return v
+        })
       }
-    } else if (ls.parseSingleLine) {
-      const lines = content.split(/\r?\n/)
-      for (let i = 0; i < lines.length; i++) {
-        context.line = lines[i]
-        context.lineNumber = i + 1
-        pr = mergeDependencies(pr, ls.parseSingleLine(context))
-      }
+      data = mergeDependencies(data, result)
     }
-
-    const resolvePathDependency = (d: string) => {
-      const cd = cancelDot(d)
-      const resolvedDir = callContext.nameResolver(cd)
-      context.debugOutput('dir resolving: ', cd, ' => ', resolvedDir)
-      const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
-      return resolvePath(files, parent, [cd, ...candidates], strictMatch)
-    }
-    for (const k in pr) {
-      const deps = pr[k]
-      pr[k] = deps.map(v => {
-        const d1 = resolvePathDependency(v)
-        if (d1 !== null) return d1
-        const dr = callContext.nameResolver(v)
-        if (dr !== null) {
-          const d2 = resolvePathDependency(dr)
-          if (d2 !== null) return d2
-        }
-        return v
-      })
-    }
-
-    data = mergeDependencies(data, pr)
   }
 
   return data

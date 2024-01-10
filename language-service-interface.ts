@@ -9,10 +9,12 @@ export type ParseContext = {
     pathFilters: PathFilters,
     rootDir: string,
     files: string[], // relative to rootDir
-    currentFile: string, // relative to rootDir
-    fileContent: string,
-    lineNumber: number,
-    line: string,
+    file: string, // relative to rootDir
+    subDir: string, // relative to rootDir
+    ext: string,
+    _privateFileContent: string,
+    fileContent: () => string,
+    lines: () => string[],
     nameResolver: (name: string) => string | null
     // deno-lint-ignore no-explicit-any
     languageOption: any,
@@ -24,11 +26,9 @@ export type Dependencies = {[id:string]: string[]}
 
 export interface LanguageService {
     name: string
-    exts: string[]
     desc?: string
     moduleSeparator?: string
-    parseSingleLine?(context: ParseContext): Dependencies
-    parse?(context: ParseContext): Dependencies
+    parse(context: ParseContext): Dependencies
     getResolveCandidates?(f: string): string[]
 }
 
