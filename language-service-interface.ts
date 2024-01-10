@@ -8,8 +8,8 @@ export type PathFilters = {
 export type ParseContext = {
     pathFilters: PathFilters,
     rootDir: string,
-    files: string[],
-    currentFile: string,
+    files: string[], // relative to rootDir
+    currentFile: string, // relative to rootDir
     fileContent: string,
     lineNumber: number,
     line: string,

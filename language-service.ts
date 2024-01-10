@@ -101,8 +101,13 @@ function parseCLikeLanguage (context: ParseContext) {
   if (r) dependencies.push(r[1])
   r = context.line.match(/^\s*#\s*include\s*"([^\s]+)"\s*$/)
   if (r) {
-    // TODO for "" style includes, we need to search the file directly in current directory here
-    dependencies.push(r[1])
+    const subDir = path.dirname(context.currentFile)
+    const includePath = subDir + '/' + r[1]
+    if (context.files.indexOf(includePath) >= 0) {
+      dependencies.push(includePath)
+    } else {
+      dependencies.push(r[1])
+    }
   }
   return {[context.currentFile]: dependencies}
 }
