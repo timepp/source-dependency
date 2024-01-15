@@ -29,8 +29,8 @@
             "id": "language",
             "type": "pickString",
             "description": "language",
-            "options": ["typescript","C++"],
-            "default": "typescript"
+            "options": ["typescript","C++","all"],
+            "default": "all"
         },
         {
             "id": "config",

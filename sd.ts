@@ -4,7 +4,7 @@ import * as flags from "https://deno.land/std@0.198.0/flags/mod.ts"
 import * as json5 from "https://deno.land/x/json5@v1.0.0/mod.ts"
 import * as color from "https://deno.land/std@0.208.0/fmt/colors.ts";
 import * as ls from './language-service.ts'
-import { PathFilters, DependencyData } from "./language-service-interface.ts";
+import { PathFilters, DependencyData, Dependencies } from "./language-service-interface.ts";
 import * as util from './util.ts'
 import { generateOutput, getAllGenerators } from './generator.ts'
 
@@ -18,9 +18,11 @@ const defaultConfig = {
   inputPathMapping: [] as string[],
   modulePathSeparator: '',
   prefix: '',
-  language: 'typescript',
+  language: '',
   languageOption: '{}',
   target: '.',
+  saveParsingResultToFile: '',
+  loadParsingResultFromFile: '',
   outputFormat: 'plain',
   outputFile: '',
   configFile: '',
@@ -38,9 +40,11 @@ const configDescription: {[P in keyof typeof defaultConfig]: [/*doc*/string, /*a
   rootNodesFilters: ['filters to pick root nodes', 'nf'],
   modulePathSeparator: ['override language defined module path separator', 's'],
   prefix: ['prefix', 'p'],
-  language: [`languages, all supported languages are: ${ls.getSupportedLanguages().join(',')}`, 'l'],
+  language: [`specify language, if not provided, all languages will be proceeded. All supported languages are: ${ls.getSupportedLanguages().join(',')}`, 'l'],
   languageOption: ['language options, see below section for description', 'lo'],
   target: ['target, can be a file or a folder', ''],
+  saveParsingResultToFile: ['save parsing result to file to accelerate parsing stage', 'sr'],
+  loadParsingResultFromFile: ['load parsing result from file to accelerate parsing stage. parsing related flags will be ignored when this is set, e.g. input filters', 'lr'],
   outputFormat: ['output format, see below section for description', 'f'],
   outputFile: ['output file', 'o'],
   depth: ['depth', ''],
@@ -69,6 +73,71 @@ function showHelp() {
   }
 }
 
+function parseConfigFile(f: string) {
+  try {
+    const config = json5.parse(Deno.readTextFileSync(f))
+    return config
+  } catch (e) {
+    writeControlMsg(`failed to parse config file ${f}: ${e}`)
+    return {}
+  }
+}
+
+function parseFromParsingResultFile(f: string) {
+  writeControlMsg(`loading parsing result from file ${f}...`)
+  const deps = JSON.parse(Deno.readTextFileSync(f))
+  return deps as Dependencies
+}
+function parse(c: typeof defaultConfig) {
+  const pathFilters = parseFilters(c.inputFilters)
+  if (c.excludeWellKnownAuxiliaryFolders) {
+    pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
+  }
+  const languageOption = (typeof c.languageOption === 'string')? json5.parse(c.languageOption): c.languageOption
+  const strictMatching = false
+  const targetIsFile = Deno.statSync(c.target).isFile
+  const dir = targetIsFile ? path.dirname(c.target) : c.target
+  
+  if (targetIsFile) {
+    debugOutput('searching directory: ', dir)
+    debugOutput('target is file: ', c.target)
+  } else {
+    debugOutput('searching directory: ', dir)
+    debugOutput('path filters: ', pathFilters)
+  }
+  
+  writeControlMsg(`searching source files...`)
+  const files = targetIsFile ? [c.target] 
+    : [...fs.walkSync(dir, { 
+        includeDirs: false, 
+        skip: pathFilters.excludeFilters, 
+        match: pathFilters.includeFilters.length > 0 ? pathFilters.includeFilters : undefined
+       })].map(v => v.path.replaceAll('\\', '/'))
+  const relativeFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
+  writeControlMsg(`processing ${files.length} files...`)
+  debugOutput('files: ', relativeFiles)
+  
+  const pathResolver = (s: string) => {
+    for (const m of c.inputPathMapping) {
+      const [a, b] = m.split('=')
+      if (s.startsWith(a)) {
+        return b + s.slice(a.length)
+      }
+    }
+    return s
+  }
+  
+  const callContext = {
+    nameResolver: pathResolver,
+    progressCallback: (c: number, t: number) => writeControlMsg(`processing progress: ${c} / ${t}`),
+    debugOutput,
+    languageOption
+  }
+  
+  const deps = ls.parse(path.resolve(dir), relativeFiles, c.language, strictMatching, pathFilters, callContext)
+  return deps
+}
+
 const args = flags.parse(Deno.args, {
   collect: Object.keys(defaultConfig).filter(v => Array.isArray(defaultConfig[v as keyof typeof defaultConfig])),
   alias: Object.fromEntries(Object.entries(configDescription).map(v => [v[1][1], v[0]])) as {[k: string]: string},
@@ -86,7 +155,7 @@ if (args.h || args.help) {
   Deno.exit(0)
 }
 
-const fileConfig = args.configFile? json5.parse(Deno.readTextFileSync(args.configFile)): { }
+const fileConfig = args.configFile? parseConfigFile(args.configFile): {}
 const c: typeof defaultConfig = { ...defaultConfig, ...fileConfig, ...args }
 
 // deno-lint-ignore no-explicit-any
@@ -100,60 +169,13 @@ function writeControlMsg(msg: string) {
 
 debugOutput('config: ', c)
 
-const pathFilters = parseFilters(c.inputFilters)
-if (c.excludeWellKnownAuxiliaryFolders) {
-  pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
+const deps = c.loadParsingResultFromFile? parseFromParsingResultFile(c.loadParsingResultFromFile) : parse(c)
+if (c.saveParsingResultToFile) {
+  Deno.writeTextFileSync(c.saveParsingResultToFile, JSON.stringify(deps, null, 4))
 }
+
 const resultTextFilters = parseFilters(c.resultFilters)
 const rootNodesFilters = parseFilters(c.rootNodesFilters)
-const languageOption = (typeof c.languageOption === 'string')? json5.parse(c.languageOption): c.languageOption
-const strictMatching = false
-
-const targetIsFile = Deno.statSync(c.target).isFile
-const dir = targetIsFile ? path.dirname(c.target) : c.target
-const exts = ls.getLanguageExtensions(c.language)
-
-if (targetIsFile) {
-  debugOutput('searching directory: ', dir)
-  debugOutput('target is file: ', c.target)
-} else {
-  debugOutput('searching directory: ', dir)
-  debugOutput('path filters: ', pathFilters)
-  debugOutput('file exts: ', exts)
-}
-
-writeControlMsg(`searching source files...`)
-const files = targetIsFile ? [c.target] 
-  : [...fs.walkSync(dir, { 
-      includeDirs: false, 
-      skip: pathFilters.excludeFilters, 
-      match: pathFilters.includeFilters.length > 0 ? pathFilters.includeFilters : undefined,
-      exts
-     })].map(v => v.path.replaceAll('\\', '/'))
-const relativeFiles = files.map(v => path.relative(dir, v).replaceAll('\\', '/'))
-writeControlMsg(`processing ${files.length} files...`)
-debugOutput('files: ', relativeFiles)
-
-const pathResolver = (s: string) => {
-  for (const m of c.inputPathMapping) {
-    const [a, b] = m.split('=')
-    if (s.startsWith(a)) {
-      return b + s.slice(a.length)
-    }
-  }
-  return s
-}
-
-const callContext = {
-  nameResolver: pathResolver,
-  progressCallback: (c: number, t: number) => writeControlMsg(`processing progress: ${c} / ${t}`),
-  debugOutput,
-  languageOption
-}
-
-const deps = ls.parse(path.resolve(dir), relativeFiles, c.language, !c.excludeWellKnownAuxiliaryFolders, 
-  strictMatching, pathFilters, callContext)
-
 const data: DependencyData = {
   dependencies: {...deps},
   flatDependencies: [],
@@ -212,7 +234,8 @@ data.flatDependencies = data.flatDependencies.map(v => [trimPrefix(v[0], c.prefi
 
 let sep = c.modulePathSeparator
 if (sep === '') {
-  sep = ls.getLanguageService(c.language).moduleSeparator || '/'
+  // sep = ls.getLanguageService(c.language).moduleSeparator || '/'
+  sep = '/'
 }
 const moduleSeparator = new RegExp(sep, 'g')
 data.contains = util.buildHierarchy(data.flatDependencies.flat(), moduleSeparator)

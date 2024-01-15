@@ -12,6 +12,7 @@ export type ParseContext = {
     file: string, // relative to rootDir
     subDir: string, // relative to rootDir
     ext: string,
+    fileName: string,
     _privateFileContent: string,
     fileContent: () => string,
     lines: () => string[],

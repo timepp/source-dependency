@@ -18,12 +18,12 @@ function debugOutput(...data: unknown[]) {
 
 export const NpmPackageService: LanguageService = {
     name: 'npm',
-    exts: ['.json'], // we look only into `package.json`
     desc: `parse npm project that has package.json, 
            by default we look into lock files (yarn.lock or package-lock.json), if they are not found, we parse package.json directly.
            to force parse package.json directly: set \`forceIgnoreLockFiles\` to true, set \`devDependencies\` to true to include devDependencies during parsing.
            `,
     parse: function (context: ParseContext) {
+        if (context.fileName !== 'package.json') return {}
         type LanguageOption = {
             getDependencyFromLockFile?: boolean
             devDependencies?: boolean

@@ -6,8 +6,7 @@ const generatorRegistry: { [id: string]: [(data: DependencyData) => string, stri
     js: [generateJS, 'JavaScript'],
     dot: [generateDot, 'Graphviz DOT, commonly used in real world'],
     vis: [generateVisJs, 'A html visualization powered by vis.js'],
-    plain: [generatePlain, 'Plain Text'],
-    raw: [generateRaw, 'Raw JSON']
+    plain: [generatePlain, 'Plain Text']
 }
 
 export function generateOutput(type: string, data: DependencyData) {
@@ -26,10 +25,6 @@ export function getAllGenerators() {
 
 function generatePlain (data: DependencyData) {
     return data.flatDependencies.map(d => `${d[0]} -> ${d[1]}`).join('\n')
-}
-
-function generateRaw (data: DependencyData) {
-    return JSON.stringify(data.dependencies, null, 4)
 }
 
 function generateDGML (data: DependencyData) {
