@@ -42,26 +42,20 @@ class JsLanguageService extends TsLanguageService {
   exts = ['.js', '.cjs', '.mjs', '.vue']
 }
 
-/*
-const CsharpLanguageService: LanguageService = {
-  name: 'C#',
-  exts: ['.cs'],
-  moduleSeparator: '.',
-  parseSingleLine: function (context: ParseContext) {
-    const dependencies = []
-    let module = context.file
-    let r = context.line.match(/^\s*namespace\s+(.*)\s*$/)
-    if (r) {
-      module = r[1]
-    }
-    r = context.line.match(/^\s*using\s+([A-Za-z0-9.]+);$/)
-    if (r) {
-      dependencies.push(r[1])
-    }
-    return {[module]: dependencies}
+class CsharpLanguageService implements LanguageService {
+  name = 'C#'
+  exts = ['.cs']
+  parse (context: ParseContext) {
+    if (!matchExt(context, this.exts)) return {}
+    const moduleMatcher = /^\s*namespace\s+([^\r\n]+)\s*$/gms
+    const mm = moduleMatcher.exec(context.fileContent())
+    const module = mm? mm[1] : context.file
+    const matcher = /^\s*using\s+([A-Za-z0-9.]+);$/gms
+    const deps = matchAll(context.fileContent(), matcher).map(v => v[1])
+    return {[module]: deps}
   }
 }
-
+/*
 const javaLanguageService: LanguageService = {
   name: 'java',
   exts: ['.java'],
@@ -145,45 +139,23 @@ const languageServiceRegistry: LanguageService[] = [
   new TsLanguageService(),
   // javaLanguageService,
   new CLanguageService(),
-  // CppLanguageService,
+  new CsharpLanguageService(),
   // PythonLanguageService,
-  // CsharpLanguageService,
-  NpmPackageService,
-  // new RawLanguageService(),
+  new NpmPackageService(),
 ]
 
 /**
  * cancelDot('a/b/c/../../e/./f') => 'a/e/f'
  */
 function cancelDot (s: string) {
-  const components = s.split('/')
-  const r = []
-  for (const c of components) {
-    if (c === '.') {
-      // ignore
-    } else if (c === '..') {
-      r.pop()
-    } else {
-      r.push(c)
-    }
-  }
-  return r.join('/')
+  return path.normalize(s).replaceAll('\\', '/')
 }
 
-function resolvePath (files: string[], parent: string, candidates: string[], strictMatch: boolean) {
+function resolvePath (files: Set<string>, parent: string, candidates: string[]) {
   for (const c of candidates) {
     const cc = cancelDot(c)
     const pc = path.isAbsolute(cc) ? path.relative(parent, cc) : (cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc))
-    const result = files.find(f => {
-      if (strictMatch) {
-        return f === pc
-      } else {
-        return f === pc || f === cc || f.endsWith('/' + cc)
-      }
-    })
-    if (result) {
-      return result
-    }
+    if (files.has(pc)) return pc
   }
   return null
 }
@@ -229,7 +201,8 @@ export function mergeDependencies (d1: Dependencies, d2: Dependencies) {
   return result
 }
 
-export function parse (dir: string, files: string[], language: string, strictMatch: boolean, pathFilters: PathFilters, callContext: CallContext) {
+export function parse (dir: string, files: string[], language: string, pathFilters: PathFilters, callContext: CallContext) {
+  const fileSet = new Set(files)
   let data: Dependencies = {}
   const context: ParseContext = {
     rootDir: dir,
@@ -259,12 +232,12 @@ export function parse (dir: string, files: string[], language: string, strictMat
     const resolvedDir = callContext.nameResolver(cd)
     context.debugOutput('dir resolving: ', cd, ' => ', resolvedDir)
     const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
-    return resolvePath(files, context.subDir, [cd, ...candidates], strictMatch)
+    return resolvePath(fileSet, context.subDir, [cd, ...candidates])
   }
 
   callContext.debugOutput('context: ', context)
 
-  const marker = new util.ProgressMarker(files.length, callContext.progressCallback, 100)
+  const marker = new util.ProgressMarker(files.length, callContext.progressCallback)
   for (const f of files) {
     marker.advance(1)
     context.file = f
@@ -292,6 +265,7 @@ export function parse (dir: string, files: string[], language: string, strictMat
       }
       data = mergeDependencies(data, result)
     }
+    data = mergeDependencies(data, {[f]: []})
   }
 
   context.debugOutput('data: ', data)

@@ -91,10 +91,9 @@ function parseFromParsingResultFile(f: string) {
 function parse(c: typeof defaultConfig) {
   const pathFilters = parseFilters(c.inputFilters)
   if (c.excludeWellKnownAuxiliaryFolders) {
-    pathFilters.excludeFilters.push(/\b\.git\b/, /\bnode_modules\b/)
+    pathFilters.excludeFilters.push(/\.git/, /node_modules/)
   }
   const languageOption = (typeof c.languageOption === 'string')? json5.parse(c.languageOption): c.languageOption
-  const strictMatching = false
   const targetIsFile = Deno.statSync(c.target).isFile
   const dir = targetIsFile ? path.dirname(c.target) : c.target
   
@@ -134,7 +133,7 @@ function parse(c: typeof defaultConfig) {
     languageOption
   }
   
-  const deps = ls.parse(path.resolve(dir), relativeFiles, c.language, strictMatching, pathFilters, callContext)
+  const deps = ls.parse(path.resolve(dir), relativeFiles, c.language, pathFilters, callContext)
   return deps
 }
 
