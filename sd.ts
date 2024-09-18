@@ -185,11 +185,16 @@ const data: DependencyData = {
 // `external` means the entity doesn't appear in the key of `dependencies`
 // if there is an internal entity which doesn't have a dependency, its dependency array will be empty, 
 // this can be used to differentiate `external` and `internal`
+const isExternal = (path:string) => {
+  if (path in data.dependencies) return false
+  // if (path.startsWith('./') && path.slice(2) in data.dependencies) return false
+  return true
+}
 for (const k of Object.keys(data.dependencies)) {
   if (c.excludeExternal) {
-    data.dependencies[k] = data.dependencies[k].filter(v => v in data.dependencies)
+    data.dependencies[k] = data.dependencies[k].filter(v => !isExternal(v))
   } else {
-    data.dependencies[k] = data.dependencies[k].map(v => v in data.dependencies? v: `*external/${v}`)
+    data.dependencies[k] = data.dependencies[k].map(v => isExternal(v) ? `*external/${v}` : v)
   }
 }
 

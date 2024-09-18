@@ -154,8 +154,12 @@ function cancelDot (s: string) {
 function resolvePath (files: Set<string>, parent: string, candidates: string[]) {
   for (const c of candidates) {
     const cc = cancelDot(c)
-    const pc = path.isAbsolute(cc) ? path.relative(parent, cc) : (cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc))
-    if (files.has(pc)) return pc
+    let pc = path.isAbsolute(cc) ? path.relative(parent, cc) : (cc.startsWith('/')? cc.slice(1) : joinPath(parent, cc))
+    // FIXME: this is a hack, our `files` do not have './' prefix, but `pc` calculated here will have
+    if (pc.startsWith('./')) pc = pc.slice(2)
+    if (files.has(pc)) {
+      return pc
+    }
   }
   return null
 }
@@ -230,7 +234,7 @@ export function parse (dir: string, files: string[], language: string, pathFilte
   const resolvePathDependency = (d: string, ls: LanguageService) => {
     const cd = cancelDot(d)
     const resolvedDir = callContext.nameResolver(cd)
-    context.debugOutput('dir resolving: ', cd, ' => ', resolvedDir)
+    context.debugOutput('dir resolving: ', d, ' => ', resolvedDir)
     const candidates = ls.getResolveCandidates ? ls.getResolveCandidates(resolvedDir || cd) : []
     return resolvePath(fileSet, context.subDir, [cd, ...candidates])
   }
