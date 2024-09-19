@@ -16,3 +16,16 @@ Deno.test('hierarchy', () => {
     hierarchy = util.buildHierarchy(['@msteams/components-acc-def'], /[/-]/g)
     ut.assertEquals(hierarchy, { '@msteams': { '@msteams/components': { '@msteams/components-acc': {'@msteams/components-acc-def': {}}}}})
 })
+
+Deno.test('app', () => {
+    const cmd = new Deno.Command('deno.exe', {
+        stdout: 'piped',
+        stderr: 'piped',
+        args: ['run', '-A', 'sd.ts', 'tests', '-o', 'tests_actual.txt']
+    })
+    const out = cmd.outputSync()
+    ut.assertEquals(out.code, 0)
+    const expected = Deno.readTextFileSync('tests_expected.txt')
+    const actual = Deno.readTextFileSync('tests_actual.txt')
+    ut.assertEquals(actual, expected)
+})

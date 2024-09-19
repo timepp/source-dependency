@@ -1,10 +1,10 @@
 # source-dependency
 
-A simple tool to get rough source code dependencies inside your app.
+A simple tool to get source code dependencies inside your app.
 
 The advantage of this tool is that it has minimal dependencies, which means that you do not need to do much setup, you do not need to know many specific tools for specific language.
 
-Of course the easy usage is achieved by sacrificing the accuracy. This tool only do lexical parsing, so won't be 100% accurate for complex constructs. However the accuracy is very good in practice, please see the gallery below for more usage examples.
+On the other hand, this tool only do lexical parsing, so won't be 100% accurate for complex constructs. However the accuracy is very good in practice, please see the gallery below for more usage examples.
 
 The best dependency viewer is MS dgml viewer. It's only available on Windows. On Linux/Mac use dot or integrated `visjs`.
 
